@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Daily official-careers-only WhatsApp alert for fresh India data roles."""
 # Cron: 30 8 * * * cd /path/to/app && /usr/bin/python3 job_alert.py >> job_alert.log 2>&1
-import hashlib, html, json, os, re
+import hashlib, html, json, os, re, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path; from zoneinfo import ZoneInfo
+if hasattr(sys.stdout, "reconfigure"):
+    try: sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception: pass
+if hasattr(sys.stderr, "reconfigure"):
+    try: sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception: pass
 import httpx; from bs4 import BeautifulSoup; from dateutil.parser import parse
 NOW, HOURS = datetime.now(timezone.utc), int(os.getenv("HOURS_OLD", "36")); CUTOFF, TZ = NOW-timedelta(hours=HOURS), ZoneInfo(os.getenv("TIMEZONE", "Asia/Kolkata"))
 SEEN = Path(os.getenv("SEEN_FILE", "seen_jobs.json")); MAX_JOBS = int(os.getenv("MAX_JOBS", "20"))
