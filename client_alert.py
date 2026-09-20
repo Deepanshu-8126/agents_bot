@@ -33,6 +33,7 @@ BAD = re.compile(
     r"\b(?:"
     r"unpaid test|free sample|commission[- ]only|commission based|"
     r"pay deposit|security deposit|registration fee|pay (?:a |the )?fee|"
+    r"pay for training|training fee|upfront fee|"
     r"telegram\s*@|t\.me/|contact (?:me )?on telegram|whatsapp\s*@|"
     r"need 100 projects|100 reviews|gift cards?|crypto investment|recharge task|adult content"
     r")\b",
@@ -224,12 +225,141 @@ def fetch_discord_leads():
 
 discord_leads = fetch_discord_leads
 
+# 100% FREE Remotive API + We Work Remotely (WWR) RSS Leads
+def fetch_remote_jobs():
+    out = []
+    hours_window = int(os.getenv("REMOTE_JOBS_HOURS", "24"))
+    cutoff = NOW - timedelta(hours=hours_window)
+
+    REMOTE_KEYWORDS = re.compile(
+        r"\b(?:"
+        r"video edit(?:ing|or)?|reels?|ugc|webflow|framer|n8n|automation|excel|"
+        r"landing page|shopify|wordpress|chatbot|ai automation|dashboard"
+        r")\b",
+        re.I
+    )
+
+    # 1. Remotive Free Public API (software-dev, design)
+    try:
+        url = "https://remotive.com/api/remote-jobs?category=software-dev,design"
+        res = core.HTTP.get(url, timeout=20)
+        if res.status_code == 200:
+            for job in res.json().get("jobs", []):
+                title = core.clean(job.get("title", ""))
+                company = core.clean(job.get("company_name", "Remote Company"))
+                desc = core.clean(job.get("description", ""))
+                blob = f"{title} {desc}"
+                posted_dt = core.when(job.get("publication_date"))
+
+                if not posted_dt or posted_dt < cutoff:
+                    continue
+
+                if not REMOTE_KEYWORDS.search(blob) or BAD.search(blob):
+                    continue
+
+                salary = job.get("salary")
+                if not salary:
+                    cash = re.search(
+                        r"(?i)(?:USD|INR|EUR|GBP|CAD|AUD|[$₹€£])\s?\d[\d,.]*(?:\s*(?:k|lakh|million))?(?:\s*(?:-|–|to)\s*(?:USD|INR|EUR|GBP|CAD|AUD|[$₹€£])?\s?\d[\d,.]*)?(?:\s*(?:/|per)\s*(?:hr|hour|video|reel|month|yr|year|project))?",
+                        blob
+                    )
+                    salary = cash.group(0).strip() if cash else None
+
+                if not salary:
+                    continue
+
+                service = classify(blob) or "Web"
+                tags = job.get("tags") or []
+                skills = [service] + [t for t in tags if isinstance(t, str)][:3]
+
+                add(
+                    out,
+                    ident=f"remotive_{job.get('id', '')}",
+                    kind="Verified Remote Job",
+                    title=f"{company}: {title}",
+                    client=company,
+                    service=service,
+                    budget=salary,
+                    location=job.get("candidate_required_location") or "Remote",
+                    url=job.get("url", ""),
+                    desc=desc,
+                    posted=posted_dt,
+                    source="Remotive Official",
+                    score=85,
+                    skills=skills,
+                    ptype="Remote Contract" if "contract" in str(job.get("job_type", "")).lower() else "Remote",
+                )
+    except Exception as exc:
+        print(f"[warn] Remotive API: {exc}")
+
+    # 2. We Work Remotely (WWR) Free RSS Feeds
+    wwr_feeds = [
+        "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+        "https://weworkremotely.com/remote-design-jobs.rss",
+    ]
+    for feed in wwr_feeds:
+        try:
+            r = core.HTTP.get(feed, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=20)
+            if r.status_code != 200:
+                continue
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                soup = core.BeautifulSoup(r.content, "html.parser")
+            for item in soup.find_all("item"):
+                title_node = item.find("title")
+                title = core.clean(title_node.text) if title_node else ""
+                desc_node = item.find("description")
+                desc = core.clean(desc_node.text) if desc_node else ""
+                blob = f"{title} {desc}"
+
+                pub_node = item.find("pubdate")
+                posted_dt = core.when(pub_node.text) if pub_node else None
+
+                if not posted_dt or posted_dt < cutoff:
+                    continue
+
+                if not REMOTE_KEYWORDS.search(blob) or BAD.search(blob):
+                    continue
+
+                cash = re.search(
+                    r"(?i)(?:USD|INR|EUR|GBP|CAD|AUD|[$₹€£])\s?\d[\d,.]*(?:\s*(?:k|lakh|million))?(?:\s*(?:-|–|to)\s*(?:USD|INR|EUR|GBP|CAD|AUD|[$₹€£])?\s?\d[\d,.]*)?(?:\s*(?:/|per)\s*(?:hr|hour|video|reel|month|yr|year|project))?",
+                    blob
+                )
+                salary = cash.group(0).strip() if cash else None
+
+                link_node = item.find("link")
+                link = link_node.text.strip() if link_node else ""
+
+                service = classify(blob) or "Web"
+                add(
+                    out,
+                    ident=link or title,
+                    kind="Verified Remote Job",
+                    title=f"WWR: {title}",
+                    client="Verified Employer",
+                    service=service,
+                    budget=salary or "Competitive / Disclosed in post",
+                    location="Remote",
+                    url=link,
+                    desc=desc,
+                    posted=posted_dt,
+                    source="WeWorkRemotely",
+                    score=85,
+                    skills=[service, "Remote"],
+                    ptype="Remote",
+                )
+        except Exception as exc:
+            print(f"[warn] WWR {feed}: {exc}")
+
+    return out
+
 def format_client_message(job):
     budget = job.get("budget", "")
     if not budget or budget == "Not stated":
         return None
-    # Validate currency exists in budget or is Discord discussion
-    if not any(curr in str(budget) for curr in ["$", "₹", "USD", "INR", "EUR", "GBP", "AUD", "CAD", "Discuss"]):
+    # Validate currency exists in budget or is Discord / WWR disclosure
+    if not any(curr in str(budget) for curr in ["$", "₹", "USD", "INR", "EUR", "GBP", "AUD", "CAD", "Discuss", "Competitive", "Disclosed"]):
         return None
 
     title = job.get("title", "")
@@ -266,7 +396,8 @@ def format_client_message(job):
     )
 def main():
     best = {}
-    for row in freelancer_leads()+reddit_leads()+discord_leads():
+    all_leads = freelancer_leads() + reddit_leads() + discord_leads() + fetch_remote_jobs()
+    for row in all_leads:
         if row["id"] not in best or row["score"] > best[row["id"]]["score"]: best[row["id"]] = row
     try: seen = json.loads(SEEN.read_text())
     except (FileNotFoundError, json.JSONDecodeError): seen = {}
