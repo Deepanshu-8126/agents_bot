@@ -97,30 +97,116 @@ def reddit_leads():
                 desc=desc, posted=posted, source="Reddit r/forhire original post", score=score, skills=[service], ptype=ptype)
     except Exception as exc: print(f"[warn] Reddit: {exc}")
     return out
-# Quality-scored local prospects from the approval-first Places CRM; it never auto-sends.
-def prospect_leads():
-    out=[]
-    try:
-        from prospect_app import followups_for_alert, leads_for_alert
-        for row in leads_for_alert():
-            signals=", ".join(row.get("signals") or ["manual review required"])
-            service="AI" if row.get("website") and "CTA" in signals else "Web"
-            desc=f"Google listing: {row.get('rating',0):g}/5 from {row.get('reviews',0)} reviews. Signals: {signals}. Suggested offer: {row.get('offer','')}"
-            add(out,ident=row["id"],kind="Local prospect—manual approval required",title=f"Digital growth opportunity: {row['name']}",client=row["name"],
-                service=service,budget="Custom Quote",location=row.get("address") or row.get("city",""),url=row.get("maps_url",""),desc=desc,
-                posted=row.get("first_seen"),source="Google Maps • Prospect CRM",score=int(row.get("score",0)),draft=row.get("pitch_en",""),skills=["Local Business", service],ptype="One-time")
-        for row in followups_for_alert():
-            add(out,ident=row["id"]+"|"+row["follow_up"],kind="CRM follow-up due—manual action",title=f"Follow up: {row['name']}",client=row["name"],service="Web",
-                budget="Existing conversation",location=row.get("address") or row.get("city",""),url=row.get("maps_url",""),desc=f"Pipeline stage: {row['stage']}. Follow-up was scheduled for {row['follow_up']}.",
-                posted=NOW,source="Google Maps • CRM follow-up",score=max(90,int(row.get("score",0))),draft=row.get("followup_pitch",""),skills=["CRM"],ptype="Follow-up")
-    except Exception as exc: print(f"[warn] Prospect CRM: {exc}")
+DISCORD_KEYWORDS = re.compile(
+    r"\b(?:"
+    r"need editor|need website|looking for editor|hiring video|ugc|"
+    r"need video editor|looking for video editor|hiring editor|"
+    r"need developer|looking for developer|need web|looking for website|"
+    r"need designer|looking for designer|hiring designer"
+    r")\b",
+    re.I
+)
+
+# 100% FREE Discord hidden leads from server channels via Discord Bot API (No paid APIs)
+def discord_leads():
+    token = os.getenv("DISCORD_TOKEN", "").strip()
+    channels_raw = os.getenv("DISCORD_CHANNELS", "").strip()
+    if not token or not channels_raw:
+        return []
+
+    auth_header = token if token.startswith("Bot ") else f"Bot {token}"
+    headers = {
+        "Authorization": auth_header,
+        "User-Agent": "DiscordBot (https://github.com/Deepanshu-8126/agents_bot, v1.0)"
+    }
+    
+    out = []
+    hours_window = int(os.getenv("DISCORD_HOURS", "3"))
+    cutoff = NOW - timedelta(hours=hours_window)
+
+    for item in filter(None, [c.strip() for c in channels_raw.split(",")]):
+        if ":" in item:
+            guild_id, cid = item.split(":", 1)
+        elif "/" in item:
+            guild_id, cid = item.split("/", 1)
+        else:
+            guild_id, cid = "@me", item
+
+        try:
+            url = f"https://discord.com/api/v10/channels/{cid}/messages"
+            res = core.HTTP.get(url, headers=headers, params={"limit": 20})
+            if res.status_code != 200:
+                print(f"[warn] Discord channel {cid}: HTTP {res.status_code}")
+                continue
+            
+            messages = res.json()
+            if not isinstance(messages, list):
+                continue
+
+            for msg in messages:
+                author = msg.get("author", {})
+                if author.get("bot"):
+                    continue
+
+                content = core.clean(msg.get("content", ""))
+                msg_id = str(msg.get("id", ""))
+                posted_str = msg.get("timestamp", "")
+                posted_dt = core.when(posted_str)
+
+                if not posted_dt or posted_dt < cutoff:
+                    continue
+
+                service = classify(content)
+                if not service:
+                    continue
+
+                has_intent = bool(DISCORD_KEYWORDS.search(content) or INTENT.search(content))
+                if not has_intent or BAD.search(content):
+                    continue
+
+                cash = re.search(
+                    r"(?i)(?:USD|INR|[$₹€£])\s?\d[\d,.]*(?:\s*(?:k|lakh|million))?(?:\s*(?:-|–|to)\s*(?:USD|INR|[$₹€£])?\s?\d[\d,.]*)?(?:\s*(?:/|per)\s*(?:hr|hour|video|reel|month|project))?",
+                    content
+                )
+                budget = cash.group(0) if cash else "Discuss on Discord"
+                ptype = "Hourly" if "/hr" in content.lower() or "hour" in content.lower() else "Fixed"
+
+                lines = [line.strip() for line in content.splitlines() if line.strip()]
+                first_line = lines[0] if lines else content
+                title = first_line[:65] + ("..." if len(first_line) > 65 else "")
+
+                client_name = author.get("global_name") or author.get("username") or "Discord Client"
+                msg_url = f"https://discord.com/channels/{guild_id}/{cid}/{msg_id}"
+                score = 75 + 10 * bool(cash) + 5 * (len(content) > 150)
+
+                add(
+                    out,
+                    ident=f"discord_{cid}_{msg_id}",
+                    kind="Discord Client Request",
+                    title=f"Discord: {title}",
+                    client=client_name,
+                    service=service,
+                    budget=budget,
+                    location="Remote / Discord",
+                    url=msg_url,
+                    desc=content,
+                    posted=posted_dt,
+                    source="Discord Channel",
+                    score=score,
+                    skills=[service, "Discord"],
+                    ptype=ptype,
+                )
+        except Exception as exc:
+            print(f"[warn] Discord {item}: {exc}")
+
     return out
+
 def format_client_message(job):
     budget = job.get("budget", "")
     if not budget or budget == "Not stated":
         return None
-    # Validate currency exists in budget
-    if not any(curr in str(budget) for curr in ["$", "₹", "USD", "INR", "EUR", "GBP", "AUD", "CAD"]):
+    # Validate currency exists in budget or is Discord discussion
+    if not any(curr in str(budget) for curr in ["$", "₹", "USD", "INR", "EUR", "GBP", "AUD", "CAD", "Discuss"]):
         return None
 
     title = job.get("title", "")
@@ -157,7 +243,7 @@ def format_client_message(job):
     )
 def main():
     best = {}
-    for row in freelancer_leads()+reddit_leads()+prospect_leads():
+    for row in freelancer_leads()+reddit_leads()+discord_leads():
         if row["id"] not in best or row["score"] > best[row["id"]]["score"]: best[row["id"]] = row
     try: seen = json.loads(SEEN.read_text())
     except (FileNotFoundError, json.JSONDecodeError): seen = {}

@@ -64,21 +64,20 @@ jobs:
           MAX_JOBS:             "20"
         run: python job_alert.py
 
-      - name: Run client lead alert
+      - name: Run client lead alert (Freelancer + Reddit + Discord)
         env:
           WHATSAPP_PROVIDER:      ${{ secrets.WHATSAPP_PROVIDER }}
-          WHATSAPP_TOKEN:         ${{ secrets.WHATSAPP_TOKEN }}
-          WHATSAPP_GROUP_ID:      ${{ secrets.WHATSAPP_GROUP_ID }}
-          CALLMEBOT_PHONE:        ${{ secrets.CALLMEBOT_PHONE }}
-          CALLMEBOT_APIKEY:       ${{ secrets.CALLMEBOT_APIKEY }}
-          GOOGLE_PLACES_API_KEY:  ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          TELEGRAM_BOT_TOKEN:     ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:       ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_TOKEN:          ${{ secrets.DISCORD_TOKEN }}
+          DISCORD_CHANNELS:       ${{ secrets.DISCORD_CHANNELS }}
+          DISCORD_HOURS:          "3"
           PORTFOLIO_URL:          ${{ secrets.PORTFOLIO_URL }}
           TIMEZONE:               Asia/Kolkata
           CLIENT_HOURS_OLD:       "48"
           MAX_CLIENT_LEADS:       "12"
-          MIN_FIXED_USD:          "40"
+          MIN_FIXED_USD:          "30"
           MIN_HOURLY_USD:         "5"
-          MAX_PROSPECT_ALERTS:    "6"
         run: python client_alert.py
 
       # Save updated seen-files so next run deduplicates
