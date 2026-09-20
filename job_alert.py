@@ -123,25 +123,41 @@ def messages(jobs):
     if current != header: batches.append(current)
     return batches
 def send(message):
-    """Send message via WhatsApp. Provider priority:
-    1. callmebot — free, unlimited, personal number (set CALLMEBOT_PHONE + CALLMEBOT_APIKEY)
-    2. whapi     — free 500 msg/month, supports groups (set WHATSAPP_TOKEN + WHATSAPP_GROUP_ID)
-    3. wassenger — paid, supports groups
+    """Send alert via messaging provider.
+    Providers (set WHATSAPP_PROVIDER env var):
+      telegram   — FREE forever, unlimited. Needs TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID  ← RECOMMENDED
+      callmebot  — FREE unlimited, personal WhatsApp. Needs CALLMEBOT_PHONE + CALLMEBOT_APIKEY
+      whapi      — Free 150 msg trial then paid. Needs WHATSAPP_TOKEN + WHATSAPP_GROUP_ID
+      wassenger  — Paid. Needs WHATSAPP_TOKEN + WHATSAPP_GROUP_ID
     DRY_RUN=1 prints instead of sending.
     """
     if os.getenv("DRY_RUN") == "1":
         print(message)
         return
-    provider = os.getenv("WHATSAPP_PROVIDER", "whapi").lower()
-    # CallMeBot: truly free, unlimited, personal WhatsApp only (no group)
-    if provider == "callmebot":
-        phone = os.environ["CALLMEBOT_PHONE"]   # international format, no +: e.g. 919876543210
+    provider = os.getenv("WHATSAPP_PROVIDER", "telegram").lower()
+
+    if provider == "telegram":
+        # ✅ Best free option — unlimited, forever, no trial
+        # Setup: @BotFather → /newbot → copy TOKEN
+        # Chat ID: open https://api.telegram.org/bot<TOKEN>/getUpdates after /start to your bot
+        bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
+        chat_id   = os.environ["TELEGRAM_CHAT_ID"]
+        for chunk in [message[i:i+4000] for i in range(0, len(message), 4000)]:
+            r = HTTP.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={"chat_id": chat_id, "text": chunk},
+            )
+            r.raise_for_status()
+        return
+
+    elif provider == "callmebot":
+        phone  = os.environ["CALLMEBOT_PHONE"]   # e.g. 919876543210 (no +)
         apikey = os.environ["CALLMEBOT_APIKEY"]
-        from urllib.parse import quote as _q
         response = HTTP.get(
             "https://api.callmebot.com/whatsapp.php",
             params={"phone": phone, "text": message, "apikey": apikey},
         )
+
     elif provider == "wassenger":
         token, group = os.environ["WHATSAPP_TOKEN"], os.environ["WHATSAPP_GROUP_ID"]
         response = HTTP.post(
@@ -149,7 +165,8 @@ def send(message):
             headers={"Token": token},
             json={"group": group, "message": message},
         )
-    else:  # whapi (default) — free 500 msg/month, supports groups
+
+    else:  # whapi
         token, group = os.environ["WHATSAPP_TOKEN"], os.environ["WHATSAPP_GROUP_ID"]
         response = HTTP.post(
             "https://gate.whapi.cloud/messages/text",

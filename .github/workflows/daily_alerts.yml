@@ -41,6 +41,8 @@ jobs:
           WHATSAPP_PROVIDER:    ${{ secrets.WHATSAPP_PROVIDER }}
           WHATSAPP_TOKEN:       ${{ secrets.WHATSAPP_TOKEN }}
           WHATSAPP_GROUP_ID:    ${{ secrets.WHATSAPP_GROUP_ID }}
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
           CALLMEBOT_PHONE:      ${{ secrets.CALLMEBOT_PHONE }}
           CALLMEBOT_APIKEY:     ${{ secrets.CALLMEBOT_APIKEY }}
           TIMEZONE:             Asia/Kolkata
@@ -53,6 +55,8 @@ jobs:
           WHATSAPP_PROVIDER:    ${{ secrets.WHATSAPP_PROVIDER }}
           WHATSAPP_TOKEN:       ${{ secrets.WHATSAPP_TOKEN }}
           WHATSAPP_GROUP_ID:    ${{ secrets.WHATSAPP_GROUP_ID }}
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
           CALLMEBOT_PHONE:      ${{ secrets.CALLMEBOT_PHONE }}
           CALLMEBOT_APIKEY:     ${{ secrets.CALLMEBOT_APIKEY }}
           TIMEZONE:             Asia/Kolkata
