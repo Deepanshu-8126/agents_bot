@@ -1,0 +1,90 @@
+name: Daily Job + Client Alerts (8:30 AM IST)
+
+on:
+  schedule:
+    # 3:00 AM UTC = 8:30 AM IST
+    - cron: "0 3 * * *"
+  workflow_dispatch:   # manual trigger from GitHub UI anytime
+
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Restore seen-files cache between runs (deduplication)
+      - name: Restore dedup cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            seen_jobs.json
+            seen_local_jobs.json
+            seen_clients.json
+            prospects.json
+          key: seen-files-${{ runner.os }}
+          restore-keys: seen-files-
+
+      - name: Run local Kumaon/SIDCUL alert
+        env:
+          WHATSAPP_PROVIDER:    ${{ secrets.WHATSAPP_PROVIDER }}
+          WHATSAPP_TOKEN:       ${{ secrets.WHATSAPP_TOKEN }}
+          WHATSAPP_GROUP_ID:    ${{ secrets.WHATSAPP_GROUP_ID }}
+          CALLMEBOT_PHONE:      ${{ secrets.CALLMEBOT_PHONE }}
+          CALLMEBOT_APIKEY:     ${{ secrets.CALLMEBOT_APIKEY }}
+          TIMEZONE:             Asia/Kolkata
+          LOCAL_HOURS_OLD:      "168"
+          MAX_LOCAL_JOBS:       "10"
+        run: python local_alert.py
+
+      - name: Run national job alert
+        env:
+          WHATSAPP_PROVIDER:    ${{ secrets.WHATSAPP_PROVIDER }}
+          WHATSAPP_TOKEN:       ${{ secrets.WHATSAPP_TOKEN }}
+          WHATSAPP_GROUP_ID:    ${{ secrets.WHATSAPP_GROUP_ID }}
+          CALLMEBOT_PHONE:      ${{ secrets.CALLMEBOT_PHONE }}
+          CALLMEBOT_APIKEY:     ${{ secrets.CALLMEBOT_APIKEY }}
+          TIMEZONE:             Asia/Kolkata
+          HOURS_OLD:            "36"
+          MAX_JOBS:             "20"
+        run: python job_alert.py
+
+      - name: Run client lead alert
+        env:
+          WHATSAPP_PROVIDER:      ${{ secrets.WHATSAPP_PROVIDER }}
+          WHATSAPP_TOKEN:         ${{ secrets.WHATSAPP_TOKEN }}
+          WHATSAPP_GROUP_ID:      ${{ secrets.WHATSAPP_GROUP_ID }}
+          CALLMEBOT_PHONE:        ${{ secrets.CALLMEBOT_PHONE }}
+          CALLMEBOT_APIKEY:       ${{ secrets.CALLMEBOT_APIKEY }}
+          GOOGLE_PLACES_API_KEY:  ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          PORTFOLIO_URL:          ${{ secrets.PORTFOLIO_URL }}
+          TIMEZONE:               Asia/Kolkata
+          CLIENT_HOURS_OLD:       "48"
+          MAX_CLIENT_LEADS:       "12"
+          MIN_FIXED_USD:          "40"
+          MIN_HOURLY_USD:         "5"
+          MAX_PROSPECT_ALERTS:    "6"
+        run: python client_alert.py
+
+      # Save updated seen-files so next run deduplicates
+      - name: Save dedup cache
+        if: always()
+        uses: actions/cache@v4
+        with:
+          path: |
+            seen_jobs.json
+            seen_local_jobs.json
+            seen_clients.json
+            prospects.json
+          key: seen-files-${{ runner.os }}-${{ github.run_id }}

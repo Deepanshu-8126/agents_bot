@@ -1,0 +1,19 @@
+# Secrets — NEVER commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Runtime state / dedup cache (managed by GitHub Actions cache)
+seen_jobs.json
+seen_local_jobs.json
+seen_clients.json
+prospects.json
+*.tmp
+
+# Logs
+*.log
+alerts.log
