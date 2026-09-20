@@ -4,6 +4,20 @@ import hashlib, json, os, re
 from datetime import timedelta
 from pathlib import Path
 from xml.etree import ElementTree as ET
+
+# Load .env file automatically if present
+def _load_env():
+    p = Path(".env")
+    if p.is_file():
+        for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip("'\"")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+_load_env()
+
 import job_alert as core
 NOW, TZ = core.NOW, core.TZ
 HOURS = int(os.getenv("CLIENT_HOURS_OLD", "48")); MAX_LEADS = int(os.getenv("MAX_CLIENT_LEADS", "12"))
@@ -99,16 +113,14 @@ def reddit_leads():
     return out
 DISCORD_KEYWORDS = re.compile(
     r"\b(?:"
-    r"need editor|need website|looking for editor|hiring video|ugc|"
-    r"need video editor|looking for video editor|hiring editor|"
-    r"need developer|looking for developer|need web|looking for website|"
-    r"need designer|looking for designer|hiring designer"
+    r"need|hiring|looking for|budget|pay|"
+    r"editor|website|ugc|framer|webflow|n8n|automation|video"
     r")\b",
     re.I
 )
 
 # 100% FREE Discord hidden leads from server channels via Discord Bot API (No paid APIs)
-def discord_leads():
+def fetch_discord_leads():
     token = os.getenv("DISCORD_TOKEN", "").strip()
     channels_raw = os.getenv("DISCORD_CHANNELS", "").strip()
     if not token or not channels_raw:
@@ -135,6 +147,10 @@ def discord_leads():
         try:
             url = f"https://discord.com/api/v10/channels/{cid}/messages"
             res = core.HTTP.get(url, headers=headers, params={"limit": 20})
+            if res.status_code == 401 and not token.startswith("Bot "):
+                # Fallback if user passed direct token
+                res = core.HTTP.get(url, headers={"Authorization": token, "User-Agent": headers["User-Agent"]}, params={"limit": 20})
+
             if res.status_code != 200:
                 print(f"[warn] Discord channel {cid}: HTTP {res.status_code}")
                 continue
@@ -156,19 +172,24 @@ def discord_leads():
                 if not posted_dt or posted_dt < cutoff:
                     continue
 
-                service = classify(content)
-                if not service:
+                # Filter by required keywords: need, hiring, looking for, budget, pay
+                if not DISCORD_KEYWORDS.search(content) or BAD.search(content):
                     continue
 
-                has_intent = bool(DISCORD_KEYWORDS.search(content) or INTENT.search(content))
-                if not has_intent or BAD.search(content):
-                    continue
+                service = classify(content) or "Freelance"
 
                 cash = re.search(
-                    r"(?i)(?:USD|INR|[$₹€£])\s?\d[\d,.]*(?:\s*(?:k|lakh|million))?(?:\s*(?:-|–|to)\s*(?:USD|INR|[$₹€£])?\s?\d[\d,.]*)?(?:\s*(?:/|per)\s*(?:hr|hour|video|reel|month|project))?",
+                    r"(?i)(?:USD|INR|EUR|GBP|CAD|AUD|[$₹€£])\s?\d[\d,.]*(?:\s*(?:k|lakh|million))?(?:\s*(?:-|–|to)\s*(?:USD|INR|EUR|GBP|CAD|AUD|[$₹€£])?\s?\d[\d,.]*)?(?:\s*(?:/|per)\s*(?:hr|hour|video|reel|month|project|page))?",
                     content
                 )
-                budget = cash.group(0) if cash else "Discuss on Discord"
+                if cash:
+                    budget = cash.group(0).strip()
+                elif "budget" in content.lower():
+                    m = re.search(r"(?i)budget\s*[:=-]?\s*([^\n,.]+)", content)
+                    budget = f"Budget: {m.group(1).strip()}" if m else "Discuss on Discord"
+                else:
+                    budget = "Discuss on Discord"
+
                 ptype = "Hourly" if "/hr" in content.lower() or "hour" in content.lower() else "Fixed"
 
                 lines = [line.strip() for line in content.splitlines() if line.strip()]
@@ -200,6 +221,8 @@ def discord_leads():
             print(f"[warn] Discord {item}: {exc}")
 
     return out
+
+discord_leads = fetch_discord_leads
 
 def format_client_message(job):
     budget = job.get("budget", "")
