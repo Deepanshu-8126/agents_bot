@@ -10,6 +10,20 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     try: sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception: pass
+
+# Load .env file automatically if present
+def _load_env():
+    p = Path(".env")
+    if p.is_file():
+        for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip("'\"")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+_load_env()
+
 import httpx; from bs4 import BeautifulSoup; from dateutil.parser import parse
 NOW, HOURS = datetime.now(timezone.utc), int(os.getenv("HOURS_OLD", "36")); CUTOFF, TZ = NOW-timedelta(hours=HOURS), ZoneInfo(os.getenv("TIMEZONE", "Asia/Kolkata"))
 SEEN = Path(os.getenv("SEEN_FILE", "seen_jobs.json")); MAX_JOBS = int(os.getenv("MAX_JOBS", "20"))
@@ -150,16 +164,20 @@ def send(message):
 
     if provider == "telegram":
         # ✅ Best free option — unlimited, forever, no trial
-        # Setup: @BotFather → /newbot → copy TOKEN
-        # Chat ID: open https://api.telegram.org/bot<TOKEN>/getUpdates after /start to your bot
-        bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
-        chat_id   = os.environ["TELEGRAM_CHAT_ID"]
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        chat_id   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+        if not bot_token or not chat_id:
+            print("[warn] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing! Set them in GitHub Secrets or .env.")
+            return
         for chunk in [message[i:i+4000] for i in range(0, len(message), 4000)]:
-            r = HTTP.post(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json={"chat_id": chat_id, "text": chunk},
-            )
-            r.raise_for_status()
+            try:
+                r = HTTP.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    json={"chat_id": chat_id, "text": chunk},
+                )
+                r.raise_for_status()
+            except Exception as exc:
+                print(f"[warn] Telegram send failed: {exc}")
         return
 
     elif provider == "callmebot":
