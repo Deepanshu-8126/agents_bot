@@ -113,11 +113,17 @@ def excerpt(text):
     parts = re.split(r"(?<=[.!?])\s+", text); useful = [x for x in parts if re.search(r"\b(?:python|experience|fresher|intern)\b", x, re.I)]
     value = " ".join((useful or parts)[:2]); return value[:220].rstrip()+("…" if len(value) > 220 else "")
 def messages(jobs):
-    header = f"📊 *Fresh India Data Jobs — {NOW.astimezone(TZ):%d %b %Y}*\n✅ Official JDs • Python • fresher/0–1 yr • ≤{HOURS}h\n"
+    header = f"📊 *Data Jobs — {NOW.astimezone(TZ):%d %b %Y}* (fresher/0–1yr)\n"
     batches, current = [], header
     for job in jobs:
         posted = when(job["posted"]).astimezone(TZ).strftime("%d %b")
-        block = f"\n• *{job['title']}* — {job['company']}\n  📍 {mode(job)} | {job['location'] or 'India'}\n  🕒 {posted} | {job['source']}\n  🔗 {job['url']}\n  📝 {excerpt(job['desc']) or 'See the official JD.'}\n"
+        loc_tag = "🏠 Remote" if job["remote"] else f"📍 {job['location'][:30]}" if job['location'] else "🇮🇳 India"
+        block = (
+            f"\n✅ *{job['title'][:50]}*\n"
+            f"   🏢 {job['company']} | {loc_tag}\n"
+            f"   🕒 {posted} | {job['source']}\n"
+            f"   🔗 {job['url']}\n"
+        )
         if len(current)+len(block) > 3500: batches.append(current); current = header+"_(continued)_\n"
         current += block
     if current != header: batches.append(current)

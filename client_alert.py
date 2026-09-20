@@ -100,13 +100,19 @@ def prospect_leads():
 def excerpt(text):
     text = re.sub(r"\s+", " ", text); return text[:240].rstrip()+("…" if len(text)>240 else "")
 def messages(leads):
-    header = f"💼 *Client Opportunities — {NOW.astimezone(TZ):%d %b %Y}*\nRemote projects • local Google prospects • Web/AI/video\n⚠️ Review every lead manually; no bulk outreach or automatic cold messages.\n"
+    header = f"💼 *Client Leads — {NOW.astimezone(TZ):%d %b %Y}*\n"
     batches, current = [], header
     for row in leads:
-        confidence = "Strong match" if row["score"] >= 83 else "Good match" if row["score"] >= 70 else "Cold prospect"
-        posted = core.when(row["posted"]).astimezone(TZ).strftime("%d %b, %I:%M %p")
-        block = f"\n• *{row['title']}*\n  🎯 {row['service']} | {row['kind']} | {confidence} {row['score']}/100\n  👤 {row['client']}\n  💰 {row['budget']} | 🌍 {row['location']}\n  🕒 {posted} | {row['source']}\n  🔗 {row['url']}\n  📝 {excerpt(row['desc'])}\n  💬 {row.get('draft') or pitch(row['service'], row['title'])}\n"
-        if len(current)+len(block)>3500: batches.append(current); current=header+"_(continued)_\n"
+        score_emoji = "🔥" if row["score"] >= 83 else "✅" if row["score"] >= 70 else "👀"
+        posted = core.when(row["posted"]).astimezone(TZ).strftime("%d %b %I:%M %p")
+        src = "Freelancer" if "freelancer" in row["source"].lower() else "Reddit r/forhire"
+        block = (
+            f"\n{score_emoji} *{row['title'][:55]}*\n"
+            f"   {row['service']} • {row['budget']} • {row['score']}/100\n"
+            f"   🕒 {posted} | {src}\n"
+            f"   🔗 {row['url']}\n"
+        )
+        if len(current)+len(block) > 3500: batches.append(current); current = header+"_(continued)_\n"
         current += block
     if current != header: batches.append(current)
     return batches

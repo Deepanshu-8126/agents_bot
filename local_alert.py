@@ -100,12 +100,18 @@ def nestle_jobs():
         except Exception as exc: print(f"[warn] Nestlé {place}: {exc}")
     return out
 def messages(jobs):
-    header=f"🏭 *Kumaon/SIDCUL Skill-Match Jobs — {NOW.astimezone(TZ):%d %b %Y}*\nRudrapur • Haldwani • Pantnagar • nearby hubs\n✅ Original company career pages only\n"
+    header=f"🏭 *Kumaon/SIDCUL Jobs — {NOW.astimezone(TZ):%d %b %Y}*\n"
     batches,current=[],header
     for row in jobs:
         posted=core.when(row["posted"]).astimezone(TZ).strftime("%d %b %Y")
-        summary=(row["desc"][:240].rstrip()+"…") if len(row["desc"])>240 else row["desc"]
-        block=f"\n• *{row['title']}* — {row['company']}\n  📍 {row['location']} | 🧭 {row['fit']}\n  🛠 {row['skills'] or 'See official JD'}\n  🕒 {posted} | {row['source']}\n  🔗 {row['url']}\n  📝 {summary}\n"
+        skills_short=(row["skills"] or "See JD")[:60]
+        block=(
+            f"\n✅ *{row['title'][:50]}*\n"
+            f"   🏢 {row['company']} | 📍 {row['location'][:30]}\n"
+            f"   🛠 {skills_short} | 🧭 {row['fit']}\n"
+            f"   🕒 {posted}\n"
+            f"   🔗 {row['url']}\n"
+        )
         if len(current)+len(block)>3500: batches.append(current);current=header+"_(continued)_\n"
         current+=block
     if current!=header:batches.append(current)
