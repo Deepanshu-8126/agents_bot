@@ -240,7 +240,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorised():return
         path=self.path.split("?",1)[0]
         if path=="/":
-            raw=HTML_PATH.read_text().replace("__MAPS_KEY__",json.dumps(os.getenv("GOOGLE_MAPS_BROWSER_KEY",""))).encode();self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",str(len(raw)));self.end_headers();self.wfile.write(raw)
+            raw=HTML_PATH.read_text(encoding="utf-8").replace("__MAPS_KEY__",json.dumps(os.getenv("GOOGLE_MAPS_BROWSER_KEY",""))).encode();self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",str(len(raw)));self.end_headers();self.wfile.write(raw)
         elif path=="/api/prospects":self.send_json(api_prospects())
         elif path=="/api/status":self.send_json({**REFRESH,"places_configured":bool(os.getenv("GOOGLE_PLACES_API_KEY")),"maps_configured":bool(os.getenv("GOOGLE_MAPS_BROWSER_KEY"))})
         elif path=="/api/export.csv":
