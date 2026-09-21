@@ -402,7 +402,8 @@ def main():
     try: seen = json.loads(SEEN.read_text())
     except (FileNotFoundError, json.JSONDecodeError): seen = {}
     expiry = (NOW-timedelta(days=90)).isoformat(); seen = {k:v for k,v in seen.items() if isinstance(v,str) and v>=expiry}
-    leads = [x for x in best.values() if x["id"] not in seen]
+    force = os.getenv("FORCE_SEND") == "1"
+    leads = [x for x in best.values() if force or x["id"] not in seen]
     leads.sort(key=lambda x:("prospect" in x["kind"].lower(), -x["score"], -core.when(x["posted"]).timestamp()))
     
     cards = []

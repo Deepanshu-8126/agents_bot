@@ -4,7 +4,13 @@ on:
   schedule:
     # 3:00 AM UTC = 8:30 AM IST
     - cron: "0 3 * * *"
-  workflow_dispatch:   # manual trigger from GitHub UI anytime
+  workflow_dispatch:
+    inputs:
+      force_send:
+        description: "Force send alerts (bypass seen deduplication for testing)?"
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   alerts:
@@ -24,6 +30,29 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Verify Telegram Secrets Configuration
+        run: |
+          echo "Checking alert secrets..."
+          MISSING=0
+          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then
+            echo "::error title=Missing Secret::TELEGRAM_BOT_TOKEN is missing in GitHub Repository Secrets!"
+            MISSING=1
+          fi
+          if [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
+            echo "::error title=Missing Secret::TELEGRAM_CHAT_ID is missing in GitHub Repository Secrets!"
+            MISSING=1
+          fi
+          if [ $MISSING -eq 1 ]; then
+            echo "================================================================================="
+            echo "❌ ACTION REQUIRED: Telegram alerts cannot be sent because secrets are not set!"
+            echo "Please add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in:"
+            echo "https://github.com/${{ github.repository }}/settings/secrets/actions"
+            echo "================================================================================="
+            exit 1
+          else
+            echo "✅ Telegram secrets are configured and present."
+          fi
+
       # Restore seen-files cache between runs (deduplication)
       - name: Restore dedup cache
         uses: actions/cache@v4
@@ -38,13 +67,10 @@ jobs:
 
       - name: Run local Kumaon/SIDCUL alert
         env:
-          WHATSAPP_PROVIDER:    ${{ secrets.WHATSAPP_PROVIDER || 'telegram' }}
-          WHATSAPP_TOKEN:       ${{ secrets.WHATSAPP_TOKEN }}
-          WHATSAPP_GROUP_ID:    ${{ secrets.WHATSAPP_GROUP_ID }}
+          WHATSAPP_PROVIDER:    "telegram"
           TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
-          CALLMEBOT_PHONE:      ${{ secrets.CALLMEBOT_PHONE }}
-          CALLMEBOT_APIKEY:     ${{ secrets.CALLMEBOT_APIKEY }}
+          FORCE_SEND:           ${{ inputs.force_send && '1' || '0' }}
           TIMEZONE:             Asia/Kolkata
           LOCAL_HOURS_OLD:      "168"
           MAX_LOCAL_JOBS:       "10"
@@ -52,25 +78,23 @@ jobs:
 
       - name: Run national job alert
         env:
-          WHATSAPP_PROVIDER:    ${{ secrets.WHATSAPP_PROVIDER || 'telegram' }}
-          WHATSAPP_TOKEN:       ${{ secrets.WHATSAPP_TOKEN }}
-          WHATSAPP_GROUP_ID:    ${{ secrets.WHATSAPP_GROUP_ID }}
+          WHATSAPP_PROVIDER:    "telegram"
           TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
-          CALLMEBOT_PHONE:      ${{ secrets.CALLMEBOT_PHONE }}
-          CALLMEBOT_APIKEY:     ${{ secrets.CALLMEBOT_APIKEY }}
+          FORCE_SEND:           ${{ inputs.force_send && '1' || '0' }}
           TIMEZONE:             Asia/Kolkata
           HOURS_OLD:            "36"
           MAX_JOBS:             "20"
         run: python job_alert.py
 
-      - name: Run client lead alert (Freelancer + Reddit + Discord)
+      - name: Run client lead alert (Freelancer + Reddit + Discord + Remote)
         env:
-          WHATSAPP_PROVIDER:      ${{ secrets.WHATSAPP_PROVIDER || 'telegram' }}
+          WHATSAPP_PROVIDER:      "telegram"
           TELEGRAM_BOT_TOKEN:     ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:       ${{ secrets.TELEGRAM_CHAT_ID }}
           DISCORD_TOKEN:          ${{ secrets.DISCORD_TOKEN }}
           DISCORD_CHANNELS:       ${{ secrets.DISCORD_CHANNELS }}
+          FORCE_SEND:             ${{ inputs.force_send && '1' || '0' }}
           DISCORD_HOURS:          "3"
           PORTFOLIO_URL:          ${{ secrets.PORTFOLIO_URL }}
           TIMEZONE:               Asia/Kolkata
@@ -80,9 +104,9 @@ jobs:
           MIN_HOURLY_USD:         "5"
         run: python client_alert.py
 
-      # Save updated seen-files so next run deduplicates
+      # Save updated seen-files so next run deduplicates (unless manual force_send was used)
       - name: Save dedup cache
-        if: always()
+        if: always() && github.event.inputs.force_send != 'true'
         uses: actions/cache@v4
         with:
           path: |

@@ -121,8 +121,9 @@ def main():
     for row in successfactors_jobs()+britannia_jobs()+roquette_jobs()+nestle_jobs(): best[row["id"]]=row
     try: seen=json.loads(SEEN.read_text())
     except (FileNotFoundError,json.JSONDecodeError):seen={}
-    expiry=(NOW-timedelta(days=120)).isoformat();seen={k:v for k,v in seen.items() if isinstance(v,str) and v>=expiry}
-    jobs=[x for x in best.values() if x["id"] not in seen];jobs.sort(key=lambda x:core.when(x["posted"]),reverse=True);jobs=jobs[:MAX_JOBS]
+    force = os.getenv("FORCE_SEND") == "1"
+    jobs = [x for x in best.values() if force or x["id"] not in seen]
+    jobs.sort(key=lambda x:core.when(x["posted"]),reverse=True);jobs=jobs[:MAX_JOBS]
     if not jobs:print("No new Kumaon/SIDCUL skill-match jobs.");return
     batches=messages(jobs)
     for batch in batches:core.send(batch)

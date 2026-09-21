@@ -168,7 +168,7 @@ def send(message):
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
         chat_id   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
         if not bot_token or not chat_id:
-            print("[warn] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing! Set them in GitHub Secrets or .env.")
+            print("::error title=Missing Telegram Credentials::TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing! Set them in GitHub Secrets (Settings -> Secrets and variables -> Actions).")
             return
         for chunk in [message[i:i+4000] for i in range(0, len(message), 4000)]:
             try:
@@ -177,6 +177,7 @@ def send(message):
                     json={"chat_id": chat_id, "text": chunk},
                 )
                 r.raise_for_status()
+                print(f"[info] Telegram message delivered successfully to chat {chat_id}! (HTTP {r.status_code})")
             except Exception as exc:
                 print(f"[warn] Telegram send failed: {exc}")
         return
@@ -218,7 +219,8 @@ def main():
     try: seen = json.loads(SEEN.read_text())
     except (FileNotFoundError, json.JSONDecodeError): seen = {}
     expiry = (NOW-timedelta(days=120)).isoformat(); seen = {k:v for k,v in seen.items() if isinstance(v, str) and v >= expiry}
-    jobs = [x for x in best.values() if identity(x) not in seen]
+    force = os.getenv("FORCE_SEND") == "1"
+    jobs = [x for x in best.values() if force or identity(x) not in seen]
     jobs.sort(key=lambda x:(bool(re.search(r"\b(?:rudrapur|haldwani|pantnagar|sidcul|kichha|sitarganj|kashipur|ramnagar|nainital|udham singh nagar|uttarakhand|uttaranchal)\b", x["location"], re.I)), bool(re.search(r"\b(?:delhi|ncr|noida|gurugram|gurgaon|ghaziabad|faridabad)\b", x["location"], re.I)), mode(x)=="Remote", when(x["posted"])), reverse=True); jobs = jobs[:MAX_JOBS]
     if not jobs: print("No new matching jobs."); return
     batches = messages(jobs)
