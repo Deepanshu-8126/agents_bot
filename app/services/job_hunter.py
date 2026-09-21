@@ -30,8 +30,7 @@ class JobHunterService:
                 print(f"[warn] Source {src.name} failed: {exc}")
         return all_jobs
 
-    def filter_job_for_user(self, job: NormalizedJob, user_pref: Dict[str, Any], keywords: List[str], excludes: List[str]) -> Tuple_Bool_Distance:
-        pass
+
 
     def discover_and_filter(self, chat_id: str, raw_jobs: List[NormalizedJob] = None) -> List[NormalizedJob]:
         """Fetch, deduplicate against database, filter by user keywords, location radius, and experience."""
