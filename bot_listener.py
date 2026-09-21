@@ -448,6 +448,14 @@ def handle_message(msg):
             send_reply(chat_id, header + "\n".join(blocks))
             return
 
+    # Broadcast command: User triggers instant channel broadcast
+    if text in ("/broadcast", "/send_now", "send alerts now", "broadcast", "channel me bhejo", "bhejo"):
+        send_reply(chat_id, "📢 *Channel (@dkx_jobs) me automatic daily alerts bhejna shuru kar raha hoon...*")
+        import threading
+        threading.Thread(target=run_automatic_daily_alerts, daemon=True).start()
+        send_reply(chat_id, "✅ Alerts channel (@dkx_jobs) me dispatch ho rahe hain!")
+        return
+
     send_reply(
         chat_id,
         "🤖 *Command samajh nahi aayi!*\n\n"
@@ -456,18 +464,77 @@ def handle_message(msg):
         "• `1 mahine ki jobs batao`\n"
         "• `1 hafte ki jobs`\n"
         "• `data analyst jobs` ya `video editing`\n"
+        "• `/broadcast` (Channel me automatic alert bhejne ke liye)\n"
         "• Ya apna **Resume PDF** attach karke bhej do!"
     )
 
 
+def run_automatic_daily_alerts():
+    """Run full alert pipeline automatically and send to channel/users."""
+    print("[auto-alert] ⏰ Starting automatic daily alerts broadcast...")
+    try:
+        # 1. Local jobs
+        print("[auto-alert] Running local alerts...")
+        local_core.main()
+    except Exception as e:
+        print(f"[warn] Local alerts error: {e}")
+
+    try:
+        # 2. National jobs (Internshala, Unstop, ATS)
+        print("[auto-alert] Running national jobs alert...")
+        jobs_core.main()
+    except Exception as e:
+        print(f"[warn] Jobs alert error: {e}")
+
+    try:
+        # 3. Client leads (Freelancer, Reddit, Discord)
+        print("[auto-alert] Running client leads alert...")
+        clients_core.main()
+    except Exception as e:
+        print(f"[warn] Client leads error: {e}")
+
+    print("[auto-alert] ✅ Automatic daily alerts broadcast completed!")
+
+
+def scheduler_loop():
+    """Checks every minute to automatically send alerts at scheduled times (e.g. 8:30 AM IST and 6:30 PM IST)."""
+    print("⏰ Automatic Alert Scheduler started in background (Times: 8:30 AM IST & 6:30 PM IST)")
+    last_sent_slot = None
+    while True:
+        try:
+            # Current time in IST (UTC + 5:30)
+            now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+            today_str = now_ist.strftime("%Y-%m-%d")
+            hour, minute = now_ist.hour, now_ist.minute
+
+            # Morning slot: 8:30 AM IST | Evening slot: 6:30 PM IST
+            is_morning = (hour == 8 and minute >= 30 and minute <= 35)
+            is_evening = (hour == 18 and minute >= 30 and minute <= 35)
+
+            slot_key = f"{today_str}_{'morning' if is_morning else 'evening'}"
+            if (is_morning or is_evening) and last_sent_slot != slot_key:
+                last_sent_slot = slot_key
+                print(f"[auto-alert] 🔔 Triggering scheduled broadcast for {slot_key}...")
+                run_automatic_daily_alerts()
+
+            time.sleep(30)
+        except Exception as exc:
+            print(f"[warn] Scheduler exception: {exc}")
+            time.sleep(60)
+
+
 def run_listener():
-    """Main long-polling loop with exception recovery."""
+    """Main long-polling loop with exception recovery and automatic scheduler."""
     print("=" * 60)
     print("🤖 Interactive AI Career & Telegram Bot Running...")
     print(f"📡 Connected to Telegram API")
-    print("⚡ Features: Resume PDF memory, 1-month/1-week filter, smart match score")
+    print("⚡ Modes: 1) Automatic Daily Channel Alerts  2) Interactive User Chat & Resumes")
     print("Listening for messages & resumes... (Press Ctrl+C to stop)")
     print("=" * 60)
+
+    # Start background daily automatic scheduler thread!
+    import threading
+    threading.Thread(target=scheduler_loop, daemon=True).start()
 
     offset = None
     while True:
