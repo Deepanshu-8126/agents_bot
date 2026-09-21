@@ -160,7 +160,8 @@ def send(message):
     if os.getenv("DRY_RUN") == "1":
         print(message)
         return
-    provider = os.getenv("WHATSAPP_PROVIDER", "telegram").lower()
+    raw_provider = (os.getenv("WHATSAPP_PROVIDER") or "telegram").strip().lower()
+    provider = raw_provider if raw_provider in ("telegram", "callmebot", "wassenger", "whapi") else "telegram"
 
     if provider == "telegram":
         # ✅ Best free option — unlimited, forever, no trial
@@ -181,29 +182,34 @@ def send(message):
         return
 
     elif provider == "callmebot":
-        phone  = os.environ["CALLMEBOT_PHONE"]   # e.g. 919876543210 (no +)
-        apikey = os.environ["CALLMEBOT_APIKEY"]
-        response = HTTP.get(
-            "https://api.callmebot.com/whatsapp.php",
-            params={"phone": phone, "text": message, "apikey": apikey},
-        )
+        phone = os.getenv("CALLMEBOT_PHONE", "").strip()
+        apikey = os.getenv("CALLMEBOT_APIKEY", "").strip()
+        if not phone or not apikey:
+            print("[warn] CALLMEBOT_PHONE or CALLMEBOT_APIKEY is missing.")
+            return
+        try:
+            response = HTTP.get(
+                "https://api.callmebot.com/whatsapp.php",
+                params={"phone": phone, "text": message, "apikey": apikey},
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            print(f"[warn] Callmebot send failed: {exc}")
 
-    elif provider == "wassenger":
-        token, group = os.environ["WHATSAPP_TOKEN"], os.environ["WHATSAPP_GROUP_ID"]
-        response = HTTP.post(
-            "https://api.wassenger.com/v1/messages",
-            headers={"Token": token},
-            json={"group": group, "message": message},
-        )
-
-    else:  # whapi
-        token, group = os.environ["WHATSAPP_TOKEN"], os.environ["WHATSAPP_GROUP_ID"]
-        response = HTTP.post(
-            "https://gate.whapi.cloud/messages/text",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"to": group, "body": message},
-        )
-    response.raise_for_status()
+    elif provider in ("wassenger", "whapi"):
+        token = os.getenv("WHATSAPP_TOKEN", "").strip()
+        group = os.getenv("WHATSAPP_GROUP_ID", "").strip()
+        if not token or not group:
+            print(f"[warn] WHATSAPP_TOKEN or WHATSAPP_GROUP_ID is missing for {provider}.")
+            return
+        endpoint = "https://api.wassenger.com/v1/messages" if provider == "wassenger" else "https://gate.whapi.cloud/messages/text"
+        headers = {"Token": token} if provider == "wassenger" else {"Authorization": f"Bearer {token}"}
+        payload = {"group": group, "message": message} if provider == "wassenger" else {"to": group, "body": message}
+        try:
+            response = HTTP.post(endpoint, headers=headers, json=payload)
+            response.raise_for_status()
+        except Exception as exc:
+            print(f"[warn] {provider} send failed: {exc}")
 def main():
     best = {}
     for job in ats_jobs()+accenture_jobs()+indigo_jobs():

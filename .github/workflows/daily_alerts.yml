@@ -38,7 +38,7 @@ jobs:
 
       - name: Run local Kumaon/SIDCUL alert
         env:
-          WHATSAPP_PROVIDER:    ${{ secrets.WHATSAPP_PROVIDER }}
+          WHATSAPP_PROVIDER:    ${{ secrets.WHATSAPP_PROVIDER || 'telegram' }}
           WHATSAPP_TOKEN:       ${{ secrets.WHATSAPP_TOKEN }}
           WHATSAPP_GROUP_ID:    ${{ secrets.WHATSAPP_GROUP_ID }}
           TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -52,7 +52,7 @@ jobs:
 
       - name: Run national job alert
         env:
-          WHATSAPP_PROVIDER:    ${{ secrets.WHATSAPP_PROVIDER }}
+          WHATSAPP_PROVIDER:    ${{ secrets.WHATSAPP_PROVIDER || 'telegram' }}
           WHATSAPP_TOKEN:       ${{ secrets.WHATSAPP_TOKEN }}
           WHATSAPP_GROUP_ID:    ${{ secrets.WHATSAPP_GROUP_ID }}
           TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -66,7 +66,7 @@ jobs:
 
       - name: Run client lead alert (Freelancer + Reddit + Discord)
         env:
-          WHATSAPP_PROVIDER:      ${{ secrets.WHATSAPP_PROVIDER }}
+          WHATSAPP_PROVIDER:      ${{ secrets.WHATSAPP_PROVIDER || 'telegram' }}
           TELEGRAM_BOT_TOKEN:     ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:       ${{ secrets.TELEGRAM_CHAT_ID }}
           DISCORD_TOKEN:          ${{ secrets.DISCORD_TOKEN }}
