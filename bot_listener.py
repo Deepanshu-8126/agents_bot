@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Interactive Telegram Bot Listener.
-Allows users/friends to chat with the bot and ask:
-- '1 hafte pehle ki jobs batao' or '/jobs' -> Fresh 7-day jobs & internships (Internshala, Unstop, ATS)
-- '/clients' or 'client leads' -> Freelance leads from Freelancer, Reddit, Discord
-- '/local' or 'local jobs' -> Uttarakhand/SIDCUL jobs
-- Or any skill keyword like 'video editing', 'python', 'excel', 'data analyst'
+"""Interactive AI Career & Telegram Bot Listener with Resume Memory.
+Features:
+1. Resume Upload: Users can send a PDF/TXT resume or list their skills.
+   - Extracts skills (Python, SQL, Excel, Video Editing, React, AI, etc.)
+   - Saves profile permanently in `user_profiles.json` per chat_id.
+2. Smart Time Filter: Understands '1 mahine ki', '1 hafte ki', '2 hafte ki', 'aaj ki' jobs.
+3. Personalized Recommendations: Matches jobs against the user's saved resume with % score!
+4. Skill & Tag search: e.g. 'data analyst', 'video editing', 'internshala', 'unstop'.
+5. Freelance client leads: 'client leads', 'freelance projects'.
 """
-import html, json, os, re, sys, time
+import html, json, os, re, sys, time, io
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# Load .env
+# Load .env automatically
 def _load_env():
     p = Path(".env")
     if p.is_file():
@@ -34,14 +37,65 @@ if not BOT_TOKEN:
 
 HTTP = httpx.Client(http2=True, timeout=35)
 API_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}"
+FILE_BASE = f"https://api.telegram.org/file/bot{BOT_TOKEN}"
 
-# In-memory cache to answer instantly (< 1 sec)
+PROFILES_FILE = Path("user_profiles.json")
+
+# In-memory job cache (refreshed every 30 mins)
 CACHE = {
     "jobs": {"data": [], "timestamp": 0},
     "clients": {"data": [], "timestamp": 0},
-    "local": {"data": [], "timestamp": 0},
 }
-CACHE_TTL = 1800  # 30 minutes
+CACHE_TTL = 1800
+
+# High-demand skills list for resume parsing
+VOCABULARY_SKILLS = [
+    # Data & Analytics
+    "python", "sql", "mysql", "postgresql", "advanced excel", "excel", "power bi", "tableau",
+    "data analysis", "data analytics", "data scientist", "machine learning", "deep learning",
+    "pandas", "numpy", "statistics", "business intelligence", "mis", "etl", "bigquery",
+    # AI & Automation
+    "ai", "artificial intelligence", "prompt engineering", "nlp", "computer vision",
+    "llm", "chatgpt", "langchain", "n8n", "make", "zapier", "automation", "api",
+    # Development
+    "web development", "full stack", "frontend", "backend", "react", "next.js", "javascript",
+    "typescript", "node.js", "html", "css", "tailwind", "wordpress", "shopify", "webflow", "framer",
+    # Creative & Content
+    "video editing", "premiere pro", "after effects", "davinci resolve", "capcut", "reels",
+    "graphic design", "photoshop", "illustrator", "canva", "thumbnail design", "ugc", "content creation",
+    # Marketing & Ops
+    "digital marketing", "seo", "social media", "copywriting", "lead generation"
+]
+
+
+def load_profiles():
+    if PROFILES_FILE.is_file():
+        try:
+            return json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def save_profile(chat_id, profile):
+    profiles = load_profiles()
+    profiles[str(chat_id)] = profile
+    PROFILES_FILE.write_text(json.dumps(profiles, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def get_profile(chat_id):
+    return load_profiles().get(str(chat_id))
+
+
+def extract_skills_from_text(text):
+    """Find known technical and creative skills in raw text."""
+    found = []
+    low = text.lower()
+    for skill in VOCABULARY_SKILLS:
+        pattern = rf"\b{re.escape(skill)}\b"
+        if re.search(pattern, low):
+            found.append(skill.title())
+    return sorted(list(set(found)))
 
 
 def send_reply(chat_id, text):
@@ -52,19 +106,18 @@ def send_reply(chat_id, text):
                 f"{API_BASE}/sendMessage",
                 json={"chat_id": chat_id, "text": chunk, "parse_mode": "Markdown"},
             )
-        except Exception as exc:
-            # Fallback to plain text if Markdown parsing fails
+        except Exception:
             try:
                 HTTP.post(
                     f"{API_BASE}/sendMessage",
                     json={"chat_id": chat_id, "text": chunk},
                 )
             except Exception as e:
-                print(f"[warn] Failed to send message to {chat_id}: {e}")
+                print(f"[warn] Failed to send to {chat_id}: {e}")
 
 
-def get_fresh_jobs(force_refresh=False):
-    """Fetch jobs from past 7 days (Internshala, Unstop, ATS, Accenture)."""
+def get_all_jobs(force_refresh=False):
+    """Fetch fresh jobs from Internshala, Unstop, ATS, Accenture, IndiGo."""
     now_ts = time.time()
     if not force_refresh and CACHE["jobs"]["data"] and (now_ts - CACHE["jobs"]["timestamp"] < CACHE_TTL):
         return CACHE["jobs"]["data"]
@@ -91,28 +144,99 @@ def get_fresh_jobs(force_refresh=False):
     return results
 
 
-def get_fresh_clients(force_refresh=False):
-    """Fetch freelance client leads."""
-    now_ts = time.time()
-    if not force_refresh and CACHE["clients"]["data"] and (now_ts - CACHE["clients"]["timestamp"] < CACHE_TTL):
-        return CACHE["clients"]["data"]
+def parse_time_window_hours(text):
+    """Extract hours from natural language query (e.g. 1 mahine -> 720h, 1 hafte -> 168h)."""
+    low = text.lower()
+    if re.search(r"\b(?:1\s*mahine|ek\s*mahine|one\s*month|30\s*din|30\s*days|month)\b", low):
+        return 720  # 30 days
+    if re.search(r"\b(?:2\s*hafte|do\s*hafte|two\s*weeks?|15\s*din|15\s*days)\b", low):
+        return 360  # 15 days
+    if re.search(r"\b(?:1\s*hafte|ek\s*hafte|one\s*week|7\s*din|7\s*days|week|hafte)\b", low):
+        return 168  # 7 days
+    if re.search(r"\b(?:aaj|today|24\s*ghante|24\s*hours)\b", low):
+        return 24
+    return 168  # Default 7 days
 
-    leads = (
-        clients_core.freelancer_leads()
-        + clients_core.reddit_leads()
-        + clients_core.discord_leads()
-        + clients_core.fetch_remote_jobs()
-    )
-    best = {}
-    for row in leads:
-        if row["id"] not in best or row["score"] > best[row["id"]]["score"]:
-            best[row["id"]] = row
 
-    results = list(best.values())
-    results.sort(key=lambda x: -x["score"])
-    CACHE["clients"]["data"] = results
-    CACHE["clients"]["timestamp"] = now_ts
-    return results
+def calculate_match_score(job, user_skills):
+    """Calculate match score percentage between job and user skills."""
+    if not user_skills:
+        return 0, []
+    job_blob = f"{job.get('title', '')} {job.get('desc', '')} {job.get('skills', '')}".lower()
+    matched = [s for s in user_skills if s.lower() in job_blob]
+    score = int((len(matched) / max(len(user_skills[:6]), 1)) * 100)
+    score = min(score, 99)
+    return score, matched
+
+
+def handle_resume_document(chat_id, doc, user_name):
+    """Download and extract skills from uploaded PDF/document."""
+    file_id = doc.get("file_id")
+    file_name = doc.get("file_name", "resume.pdf")
+    mime = doc.get("mime_type", "")
+
+    send_reply(chat_id, f"📥 *Resume mil gaya:* `{file_name}`\nReading & extracting skills...")
+
+    try:
+        # 1. Get file path from Telegram
+        info_res = HTTP.get(f"{API_BASE}/getFile", params={"file_id": file_id})
+        file_path = info_res.json().get("result", {}).get("file_path")
+        if not file_path:
+            send_reply(chat_id, "❌ Telegram se file download karne me issue aaya. Dobara bhejo.")
+            return
+
+        # 2. Download file content
+        file_res = HTTP.get(f"{FILE_BASE}/{file_path}")
+        raw_bytes = file_res.content
+
+        extracted_text = ""
+        # Try PDF parsing
+        if file_name.lower().endswith(".pdf") or "pdf" in mime:
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(io.BytesIO(raw_bytes))
+                for page in reader.pages:
+                    extracted_text += page.extract_text() or ""
+            except Exception as e:
+                # Fallback simple text extraction
+                extracted_text = re.sub(r"[^\x20-\x7E]+", " ", raw_bytes.decode("latin1", errors="ignore"))
+        else:
+            extracted_text = raw_bytes.decode("utf-8", errors="ignore")
+
+        skills = extract_skills_from_text(extracted_text)
+
+        if not skills:
+            # Fallback basic prompt
+            send_reply(
+                chat_id,
+                "⚠️ *Resume read ho gaya lekin koi specific skill detect nahi hui.*\n"
+                "Aap apni skills text message me bhej sakte ho, jaise:\n"
+                "`My skills: Python, SQL, Excel, Power BI`"
+            )
+            return
+
+        # Save profile
+        profile = {
+            "name": user_name,
+            "skills": skills,
+            "file_name": file_name,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        save_profile(chat_id, profile)
+
+        skills_list_str = ", ".join([f"`{s}`" for s in skills])
+        confirmation = (
+            f"🎉 *Resume Successfully Saved & Trained!*\n\n"
+            f"👤 *Candidate:* {user_name}\n"
+            f"🛠 *Detected Skills:* {skills_list_str}\n\n"
+            f"Ab bot aapke profile ke hisab se exact matching jobs recommend karega!\n\n"
+            f"👉 Try karke dekho: Type karo *'mere liye jobs batao'* ya *'1 mahine ki jobs'*!"
+        )
+        send_reply(chat_id, confirmation)
+
+    except Exception as exc:
+        print(f"[error] Resume parsing failed: {exc}")
+        send_reply(chat_id, f"⚠️ Resume read karne me error: {exc}. Aap text me bhi skills bhej sakte ho!")
 
 
 def handle_message(msg):
@@ -121,46 +245,146 @@ def handle_message(msg):
     from_user = msg.get("from", {})
     first_name = from_user.get("first_name", "Friend")
     raw_text = msg.get("text", "").strip()
-    text = raw_text.lower()
+    document = msg.get("document")
 
-    if not chat_id or not raw_text:
+    if not chat_id:
         return
 
+    # A. Check if user sent a Resume PDF/file
+    if document:
+        handle_resume_document(chat_id, document, first_name)
+        return
+
+    if not raw_text:
+        return
+
+    text = raw_text.lower()
     print(f"[msg] From {first_name} ({chat_id}): {raw_text}")
 
-    # 1. Greetings / Start / Help
-    if text in ("/start", "/help", "hi", "hello", "hey", "help", "start"):
+    # B. Check if user sent their skills in text (e.g. "my skills are...", "resume: ...")
+    if re.search(r"\b(?:skills?|resume|bio)\s*[:=]\s*", text) or (len(text) > 40 and any(s in text for s in ("python", "excel", "video editing", "sql", "react"))):
+        detected = extract_skills_from_text(raw_text)
+        if len(detected) >= 2:
+            profile = {
+                "name": first_name,
+                "skills": detected,
+                "file_name": "manual_text",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            save_profile(chat_id, profile)
+            skills_str = ", ".join([f"`{s}`" for s in detected])
+            send_reply(
+                chat_id,
+                f"✅ *Skills Saved to Memory!*\n\n"
+                f"👤 *Profile:* {first_name}\n"
+                f"🛠 *Skills:* {skills_str}\n\n"
+                f"Ab aap poocho: *'mere liye jobs batao'* ya *'1 mahine ki jobs'*!"
+            )
+            return
+
+    # C. Greetings / Help / Menu
+    if text in ("/start", "/help", "hi", "hello", "hey", "start"):
+        profile = get_profile(chat_id)
+        profile_status = f"✅ Saved Skills: {', '.join(profile['skills'][:4])}" if profile else "ℹ️ Resume not uploaded yet (send your PDF to train me!)"
+
         reply = (
-            f"👋 *Namaste {first_name}! Main Job & Freelance Bot hoon.*\n\n"
-            f"Aap mujhse ye sab poochh sakte ho:\n\n"
-            f"📌 *1 Hafte Ki Jobs:*\n"
-            f"• Type: `1 hafte pehle ki jobs batao` ya `/jobs`\n"
-            f"_(Internshala, Unstop aur Top Companies ki pichhle 7 dino ki fresh jobs/internships)_\n\n"
-            f"💼 *Freelance Client Leads:*\n"
-            f"• Type: `client leads` ya `/clients`\n"
-            f"_(Freelancer, Reddit, Discord ke active projects aur direct client briefs)_\n\n"
-            f"🏭 *Local Uttarakhand/SIDCUL Jobs:*\n"
-            f"• Type: `local jobs` ya `/local`\n\n"
-            f"🔍 *Specific Skill Search:*\n"
-            f"• Kisi bhi skill ka naam bhejo, jaise: `python`, `data analyst`, `video editing`, `web dev`, `excel`\n"
+            f"👋 *Namaste {first_name}! Main aapka AI Job & Career Assistant hoon.*\n\n"
+            f"📊 *Aapka Status:* {profile_status}\n\n"
+            f"🔥 *Aap Mujhse Kya Pooch Sakte Ho:*\n\n"
+            f"1️⃣ *Personalized (Aapke Resume Ke Hisab Se):*\n"
+            f"• `mere liye jobs batao` ya `/myjobs`\n\n"
+            f"2️⃣ *Time-Based Queries:*\n"
+            f"• `1 mahine ki jobs batao` (Pichhle 30 din)\n"
+            f"• `1 hafte pehle ki jobs batao` ya `/jobs` (Pichhle 7 din)\n\n"
+            f"3️⃣ *Specific Role / Skill Search:*\n"
+            f"• `data analyst jobs`\n"
+            f"• `video editing jobs`\n"
+            f"• `python developer`\n\n"
+            f"4️⃣ *Resume Upload:*\n"
+            f"• Apna **Resume (PDF)** directly is chat me attach karke bhej do — bot automatically memory me save kar lega!\n\n"
+            f"5️⃣ *Freelance Client Leads:*\n"
+            f"• `client leads` ya `/clients`"
         )
         send_reply(chat_id, reply)
         return
 
-    # 2. User asks for 1 week jobs
-    if re.search(r"\b(?:1\s*hafte|ek\s*hafte|hafte|week|pichhle|jobs?|naukri|internship)\b", text) or text == "/jobs":
-        send_reply(chat_id, "⏳ *Pichhle 1 hafte ki fresh jobs & internships nikaal raha hoon...* (Internshala, Unstop & Top Companies)")
-        jobs = get_fresh_jobs()
-        if not jobs:
-            send_reply(chat_id, "ℹ️ Abhi pichhle 1 hafte me koi nayi open opportunity nahi mili. Thodi der baad try karein!")
+    # D. Personalized Query: "mere liye jobs batao" / "my jobs" / "recommend jobs"
+    if re.search(r"\b(?:mere\s*liye|recommend|my\s*jobs|matching\s*jobs|meri\s*profile)\b", text) or text == "/myjobs":
+        profile = get_profile(chat_id)
+        if not profile or not profile.get("skills"):
+            send_reply(
+                chat_id,
+                "📄 *Pehle apna Resume bhejo!*\n\n"
+                "Aap apna Resume (PDF) is chat me attach karke send karo, ya text me likho:\n"
+                "`My skills: Python, SQL, Excel, Video Editing`\n\n"
+                "Fir bot aapke exact skills ke mutabik jobs recommend karega!"
+            )
             return
 
-        top_jobs = jobs[:12]
-        header = f"🚀 *Pichhle 1 Hafte Ki Top Fresh Jobs & Internships* ({len(top_jobs)} matches):\n"
+        send_reply(chat_id, f"🎯 *{profile['name']} aapke resume ({', '.join(profile['skills'][:4])}) se matching jobs filter kar raha hoon...*")
+        jobs = get_all_jobs()
+        scored_jobs = []
+        for j in jobs:
+            score, matched_skills = calculate_match_score(j, profile["skills"])
+            if score > 0 or any(s.lower() in j["title"].lower() for s in profile["skills"]):
+                scored_jobs.append((score, matched_skills, j))
+
+        scored_jobs.sort(key=lambda x: x[0], reverse=True)
+        top_matches = scored_jobs[:10]
+
+        if not top_matches:
+            send_reply(chat_id, f"ℹ️ Abhi aapki skills ({', '.join(profile['skills'][:3])}) ke direct matches nahi mile. 1 mahine ki jobs check karein!")
+            return
+
+        header = f"🌟 *Aapke Resume Ke Hisab Se Best Recommended Jobs ({len(top_matches)} matches):*\n"
+        blocks = []
+        for i, (score, matched_skills, j) in enumerate(top_matches, 1):
+            posted = jobs_core.when(j["posted"]).astimezone(jobs_core.TZ).strftime("%d %b") if j.get("posted") else "Recent"
+            loc = "🏠 Remote / WFH" if j.get("remote") else f"📍 {j.get('location', 'India')[:25]}"
+            match_badge = f"🎯 *{score}% Match*" if score > 0 else "✨ Skill Match"
+            matched_tag = f"Skills: {', '.join(matched_skills[:3])}" if matched_skills else ""
+            blocks.append(
+                f"\n*{i}. {j['title'][:55]}* ({match_badge})\n"
+                f"   🏢 {j['company']} | {loc}\n"
+                f"   🕒 {posted} | Source: {j['source']}\n"
+                f"   🛠 {matched_tag}\n"
+                f"   🔗 {j['url']}"
+            )
+        send_reply(chat_id, header + "\n".join(blocks))
+        return
+
+    # E. Jobs by Timeframe: "1 mahine ki jobs", "1 hafte ki jobs", "jobs"
+    if re.search(r"\b(?:jobs?|naukri|internship|vacancy|vacancies)\b", text) or text == "/jobs":
+        hours = parse_time_window_hours(text)
+        time_label = "1 Mahine (30 Days)" if hours >= 720 else "2 Hafte (15 Days)" if hours >= 360 else "1 Hafte (7 Days)"
+        send_reply(chat_id, f"⏳ *Pichhle {time_label} ki fresh jobs & internships nikaal raha hoon...* (Internshala, Unstop, Top Companies)")
+
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(hours=hours)
+        all_jobs = get_all_jobs()
+
+        # Check if user also specified a skill in the query (e.g. "1 mahine ki data analyst jobs")
+        filter_skills = [w for w in re.split(r"\s+", text) if len(w) > 2 and w not in ("jobs", "job", "batao", "mahine", "hafte", "pehle", "naukri", "chahiye", "deki", "wali", "fresh", "latest")]
+
+        filtered = []
+        for j in all_jobs:
+            p_date = jobs_core.when(j.get("posted"))
+            if p_date and p_date >= cutoff_dt:
+                if filter_skills:
+                    j_text = f"{j['title']} {j.get('desc', '')} {j.get('skills', '')}".lower()
+                    if any(s in j_text for s in filter_skills):
+                        filtered.append(j)
+                else:
+                    filtered.append(j)
+
+        if not filtered:
+            filtered = all_jobs[:10]  # Fallback to latest available
+
+        top_jobs = filtered[:12]
+        header = f"🚀 *Pichhle {time_label} Ki Top Opportunities* ({len(top_jobs)} matches):\n"
         blocks = []
         for i, j in enumerate(top_jobs, 1):
             posted = jobs_core.when(j["posted"]).astimezone(jobs_core.TZ).strftime("%d %b") if j.get("posted") else "Recent"
-            loc = "🏠 Remote / WFH" if j.get("remote") else f"📍 {j.get('location', 'India')[:30]}"
+            loc = "🏠 Remote / WFH" if j.get("remote") else f"📍 {j.get('location', 'India')[:25]}"
             blocks.append(
                 f"\n*{i}. {j['title'][:55]}*\n"
                 f"   🏢 {j['company']} | {loc}\n"
@@ -170,46 +394,32 @@ def handle_message(msg):
         send_reply(chat_id, header + "\n".join(blocks))
         return
 
-    # 3. User asks for Client Leads / Freelance
+    # F. Freelance Client Leads
     if re.search(r"\b(?:client|freelance|lead|gigs?|project|kaam)\b", text) or text == "/clients":
-        send_reply(chat_id, "💼 *Fresh freelance client requirements fetch kar raha hoon...* (Freelancer + Reddit + Remote)")
-        clients = get_fresh_clients()
+        send_reply(chat_id, "💼 *Freelance client requirements fetch kar raha hoon...* (Freelancer, Reddit, Discord)")
+        clients = (
+            clients_core.freelancer_leads()
+            + clients_core.reddit_leads()
+            + clients_core.discord_leads()
+            + clients_core.fetch_remote_jobs()
+        )
         if not clients:
             send_reply(chat_id, "ℹ️ Abhi koi fresh client lead nahi mili. Kuch der baad check karein!")
             return
 
-        top_clients = clients[:6]
+        top_clients = clients[:5]
         header = f"💼 *Latest Genuine Client Requirements* ({len(top_clients)} leads):\n"
-        blocks = []
-        for i, c in enumerate(top_clients, 1):
+        send_reply(chat_id, header)
+        for c in top_clients:
             card = clients_core.format_client_message(c)
             if card:
-                blocks.append(card)
-        
-        send_reply(chat_id, header)
-        for b in blocks:
-            send_reply(chat_id, b)
+                send_reply(chat_id, card)
         return
 
-    # 4. User asks for Local Jobs
-    if re.search(r"\b(?:local|uttarakhand|sidcul|kumaon|rudrapur|haldwani|pantnagar)\b", text) or text == "/local":
-        send_reply(chat_id, "🏭 *Local Kumaon / SIDCUL jobs check kar raha hoon...*")
-        try:
-            local_jobs = local_core.successfactors_jobs() + local_core.britannia_jobs() + local_core.nestle_jobs()
-            if not local_jobs:
-                send_reply(chat_id, "ℹ️ Uttarakhand / SIDCUL me abhi koi nayi entry-level vacancy nahi hai.")
-                return
-            batches = local_core.messages(local_jobs[:8])
-            for b in batches:
-                send_reply(chat_id, b)
-        except Exception as e:
-            send_reply(chat_id, f"⚠️ Local jobs fetch karne me issue aaya: {e}")
-        return
-
-    # 5. Specific Skill Search (e.g. "python", "video editing", "excel", "data")
+    # G. Fallback: Search any keyword in jobs
     words = [w for w in re.split(r"\s+", text) if len(w) > 2]
     if words:
-        jobs = get_fresh_jobs()
+        jobs = get_all_jobs()
         matched = []
         pattern = re.compile(rf"\b(?:{'|'.join(re.escape(w) for w in words)})\b", re.I)
         for j in jobs:
@@ -219,11 +429,11 @@ def handle_message(msg):
 
         if matched:
             top_matched = matched[:8]
-            header = f"🎯 *'{raw_text}' se related {len(top_matched)} jobs mili hain:*\n"
+            header = f"🎯 *'{raw_text}' ke mutabik {len(top_matched)} jobs mili hain:*\n"
             blocks = []
             for i, j in enumerate(top_matched, 1):
                 posted = jobs_core.when(j["posted"]).astimezone(jobs_core.TZ).strftime("%d %b") if j.get("posted") else "Recent"
-                loc = "🏠 Remote" if j.get("remote") else f"📍 {j.get('location', 'India')[:30]}"
+                loc = "🏠 Remote" if j.get("remote") else f"📍 {j.get('location', 'India')[:25]}"
                 blocks.append(
                     f"\n*{i}. {j['title'][:55]}*\n"
                     f"   🏢 {j['company']} | {loc}\n"
@@ -233,24 +443,25 @@ def handle_message(msg):
             send_reply(chat_id, header + "\n".join(blocks))
             return
 
-    # 6. Fallback default reply
     send_reply(
         chat_id,
         "🤖 *Command samajh nahi aayi!*\n\n"
-        "Aap inme se kuch bhi likhkar bhej sakte ho:\n"
-        "• `1 hafte pehle ki jobs batao` ya `/jobs`\n"
-        "• `client leads` ya `/clients`\n"
-        "• `local jobs` ya `/local`\n"
-        "• Ya koi skill likho, jaise: `python`, `data analyst`, `video editing`"
+        "Aap pooch sakte ho:\n"
+        "• `mere liye jobs batao` (Aapke resume ke hisab se)\n"
+        "• `1 mahine ki jobs batao`\n"
+        "• `1 hafte ki jobs`\n"
+        "• `data analyst jobs` ya `video editing`\n"
+        "• Ya apna **Resume PDF** attach karke bhej do!"
     )
 
 
 def run_listener():
-    """Main long-polling loop."""
+    """Main long-polling loop with exception recovery."""
     print("=" * 60)
-    print("🤖 Interactive Telegram Bot Listener Running...")
-    print(f"📡 Bot connected to Telegram API: {API_BASE[:35]}***")
-    print("Listening for messages... (Press Ctrl+C to stop)")
+    print("🤖 Interactive AI Career & Telegram Bot Running...")
+    print(f"📡 Connected to Telegram API")
+    print("⚡ Features: Resume PDF memory, 1-month/1-week filter, smart match score")
+    print("Listening for messages & resumes... (Press Ctrl+C to stop)")
     print("=" * 60)
 
     offset = None
@@ -270,14 +481,14 @@ def run_listener():
                     elif "channel_post" in update:
                         handle_message(update["channel_post"])
             elif resp.status_code == 409:
-                print("[warn] Another instance is polling. Waiting 10s...")
+                print("[warn] Conflict with another listener instance. Sleeping 10s...")
                 time.sleep(10)
             else:
                 time.sleep(2)
         except httpx.ReadTimeout:
             continue
         except Exception as exc:
-            print(f"[error] Polling loop exception: {exc}")
+            print(f"[error] Polling exception: {exc}")
             time.sleep(3)
 
 
