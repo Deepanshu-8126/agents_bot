@@ -43,6 +43,16 @@ except Exception:
 API_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}"
 FILE_BASE = f"https://api.telegram.org/file/bot{BOT_TOKEN}"
 
+# Initialize App Architecture (Database, Commands, Services)
+from app.database import init_db, JobRepository
+from app.bot.commands import BotCommandHandler
+from app.services.job_hunter import JobHunterService
+
+init_db()
+app_repo = JobRepository()
+bot_cmd = BotCommandHandler(app_repo)
+job_hunter = JobHunterService(app_repo)
+
 PROFILES_FILE = Path("user_profiles.json")
 
 # In-memory job cache (refreshed every 30 mins)
@@ -265,6 +275,25 @@ def handle_message(msg):
 
     text = raw_text.lower()
     print(f"[msg] From {first_name} ({chat_id}): {raw_text}")
+
+    # 1. Modular Commands (/location, /setlocation, /radius, /keywords, /addkeyword, /removekeyword, /exclude, /excludes, /sources)
+    cmd_reply = bot_cmd.handle_command(str(chat_id), raw_text)
+    if cmd_reply:
+        send_reply(chat_id, cmd_reply)
+        return
+
+    # 2. On-demand job hunting with multi-source filtering & distance calculation
+    if text in ("/jobs", "jobs", "hunt jobs", "new jobs"):
+        pref = app_repo.get_user_preference(str(chat_id))
+        send_reply(chat_id, f"🔍 *Hunting jobs matching your preferences* ({pref['city']} | Radius {round(pref['radius_km'])} km | 10+ Sources)...")
+        matching_jobs = job_hunter.discover_and_filter(str(chat_id))
+        if not matching_jobs:
+            send_reply(chat_id, "ℹ️ No new jobs found matching your current filters. Try `/radius 200` or updating `/keywords`.")
+            return
+        send_reply(chat_id, f"🎯 *Found {len(matching_jobs[:10])} matching jobs:*\n")
+        for j in matching_jobs[:10]:
+            send_reply(chat_id, j.format_telegram())
+        return
 
     # B. Check if user sent their skills in text (e.g. "my skills are...", "resume: ...")
     if re.search(r"\b(?:skills?|resume|bio)\s*[:=]\s*", text) or (len(text) > 40 and any(s in text for s in ("python", "excel", "video editing", "sql", "react"))):
