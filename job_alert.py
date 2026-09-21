@@ -25,15 +25,24 @@ def _load_env():
 _load_env()
 
 import httpx; from bs4 import BeautifulSoup; from dateutil.parser import parse
-NOW, HOURS = datetime.now(timezone.utc), int(os.getenv("HOURS_OLD", "36")); CUTOFF, TZ = NOW-timedelta(hours=HOURS), ZoneInfo(os.getenv("TIMEZONE", "Asia/Kolkata"))
-SEEN = Path(os.getenv("SEEN_FILE", "seen_jobs.json")); MAX_JOBS = int(os.getenv("MAX_JOBS", "20"))
+NOW, HOURS = datetime.now(timezone.utc), int(os.getenv("HOURS_OLD", "168")); CUTOFF, TZ = NOW-timedelta(hours=HOURS), ZoneInfo(os.getenv("TIMEZONE", "Asia/Kolkata"))
+SEEN = Path(os.getenv("SEEN_FILE", "seen_jobs.json")); MAX_JOBS = int(os.getenv("MAX_JOBS", "25"))
 # Add any employer's public board as kind|Company|token; these are original ATS feeds, not aggregators.
 DEFAULT_BOARDS = (
  "greenhouse|Razorpay|razorpaysoftwareprivatelimited,greenhouse|Groww|groww,greenhouse|MongoDB|mongodb,greenhouse|Elastic|elastic,greenhouse|Datadog|datadog,greenhouse|Cloudflare|cloudflare,greenhouse|Twilio|twilio,greenhouse|Okta|okta,greenhouse|Airbnb|airbnb,greenhouse|Coursera|coursera,greenhouse|Samsara|samsara,greenhouse|Cockroach Labs|cockroachlabs,greenhouse|Rubrik|rubrik,greenhouse|Sumo Logic|sumologic,greenhouse|Coinbase|coinbase,greenhouse|Fivetran|fivetran,greenhouse|Netskope|netskope,"
  "greenhouse|Deliveroo|deliveroo,greenhouse|GitLab|gitlab,greenhouse|Remote|remotecom,greenhouse|Databricks|databricks,greenhouse|Stripe|stripe,lever|Meesho|meesho,lever|Zeta|zeta,lever|Sophos|sophos,ashby|Atlan|atlan,ashby|Tekion|tekion,ashby|Snowflake|snowflake,ashby|Confluent|confluent,ashby|Navi|navi,ashby|RevenueCat|revenuecat,ashby|Zapier|zapier")
 BOARDS = DEFAULT_BOARDS + ((","+os.getenv("ATS_BOARDS")) if os.getenv("ATS_BOARDS") else "")
 HTTP = httpx.Client(http2=True, follow_redirects=True, timeout=30, headers={"Accept":"application/json,text/html"})
-ROLE = re.compile(r"\b(?:data|analytics?|business intelligence|bi|mis)\b.*\b(?:analyst|analytics?|scientist|science|associate|intern(?:ship)?|trainee|executive|developer)\b|\b(?:analyst|scientist|associate|intern(?:ship)?|trainee)\b.*\b(?:data|analytics?|business intelligence|bi|mis)\b", re.I)
+ROLE = re.compile(
+    r"\b(?:"
+    r"data|analytics?|business intelligence|bi|mis|sql|excel|dashboard|power bi|tableau|"
+    r"web|frontend|front[- ]end|backend|back[- ]end|full[- ]stack|fullstack|software|developer|engineer|"
+    r"python|react|javascript|wordpress|shopify|framer|webflow|"
+    r"ai|machine learning|artificial intelligence|prompt|chatbot|automation|n8n|"
+    r"video edit(?:ing|or)?|content creator|graphic design|digital marketing"
+    r")\b",
+    re.I
+)
 ENTRY_TITLE = re.compile(r"\b(?:intern(?:ship)?|fresher|entry[- ]level|junior|associate|trainee|graduate|apprentice|(?:analyst|scientist)\s+i)\b", re.I)
 ENTRY_TEXT = re.compile(r"\b(?:fresher|fresh graduate|recent graduate|new grad(?:uate)?|entry[- ]level|no (?:prior )?experience|0\s*(?:years?|yrs?)(?:\s+of)?\s+experience|0\s*(?:-|–|to)\s*12\s*months|0\s*(?:-|–|to)\s*1\s*(?:year|yr)|(?:up to|less than) (?:one|1) year|(?:minimum |at least )?(?:one|1)\+?\s*(?:year|yr)(?:s)?(?:\s+of)?\s+(?:relevant |professional |work |industry )?experience)\b", re.I)
 SENIOR = re.compile(r"\b(?:senior|sr\.?|lead|principal|staff|manager|director|head|architect)\b", re.I)
@@ -42,7 +51,7 @@ INDIA = re.compile(r"\b(?:india|pan[- ]india|bengaluru|bangalore|gurugram|gurgao
 GLOBAL = re.compile(r"\b(?:worldwide|anywhere|global|apac|asia|work from anywhere)\b", re.I)
 REMOTE = re.compile(r"\b(?:remote|work[- ]from[- ]home|wfh|work from anywhere)\b", re.I)
 HYBRID = re.compile(r"\bhybrid\b", re.I)
-BLOCKED = re.compile(r"(?:unstop|internshala|linkedin|indeed|glassdoor|wellfound)\.", re.I)
+BLOCKED = re.compile(r"(?:linkedin|indeed|glassdoor|wellfound)\.", re.I)
 FEE = re.compile(r"\b(?:pay|deposit|transfer)\s+(?:a\s+)?(?:fee|money)|(?:registration|application) fee (?:required|mandatory)\b", re.I)
 def api(method, url, **kwargs):
     for attempt in range(3):
@@ -116,6 +125,93 @@ def indigo_jobs():
             add(out, title, "IndiGo", locations, f"https://www.goindigo.in/careers/job-details/{slug}/{job_id}.html", locale.get("externalJobDescription") or locale.get("extJobDescHeader"), postings.get("postStartDate"), "Official IndiGo")
     except Exception as exc: print(f"[warn] IndiGo: {exc}")
     return out
+# Internshala official internship and fresher job listings
+def internshala_jobs():
+    out = []
+    urls = [
+        "https://internshala.com/internships/data-science,web-development,python-django,video-making-editing-internship/",
+        "https://internshala.com/jobs/data-science,web-development,python-django,video-making-editing-jobs/"
+    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    }
+    for target in urls:
+        try:
+            resp = HTTP.get(target, headers=headers, timeout=20)
+            if resp.status_code != 200: continue
+            soup = BeautifulSoup(resp.text, "html.parser")
+            cards = soup.select("div.individual_internship")
+            for card in cards:
+                title_elem = card.select_one("a.job-title-href") or card.select_one("h2.job-internship-name a")
+                if not title_elem: continue
+                title = clean(title_elem.get_text())
+                href = title_elem.get("href", "")
+                full_url = f"https://internshala.com{href}" if href.startswith("/") else href
+                
+                comp_elem = card.select_one(".company-name") or card.select_one(".company_name")
+                company = clean(comp_elem.get_text()) if comp_elem else "Internshala Employer"
+                
+                loc_elem = card.select_one(".locations")
+                location = clean(loc_elem.get_text()) if loc_elem else "India"
+                is_remote = "work from home" in location.lower() or "remote" in location.lower()
+                
+                date_elem = card.select_one(".status-success span") or card.select_one(".color-labels span")
+                date_str = date_elem.get_text().strip() if date_elem else "Today"
+                posted = when(date_str) or NOW
+                
+                desc_elem = card.select_one(".about_job .text")
+                desc = clean(desc_elem.get_text()) if desc_elem else title
+                
+                stipend_elem = card.select_one(".stipend")
+                if stipend_elem:
+                    desc += " | Stipend: " + clean(stipend_elem.get_text())
+                
+                add(out, title, company, location, full_url, desc, posted, "Internshala", remote=is_remote)
+        except Exception as exc:
+            print(f"[warn] Internshala {target}: {exc}")
+    return out
+
+# Unstop official opportunities (jobs & internships)
+def unstop_jobs():
+    out = []
+    endpoints = [
+        "https://unstop.com/api/public/opportunity/search-result?opportunity=jobs&sort=recent&per_page=25",
+        "https://unstop.com/api/public/opportunity/search-result?opportunity=internships&sort=recent&per_page=25",
+        "https://unstop.com/api/public/opportunity/search-result?opportunity=jobs&searchTerm=data&sort=recent&per_page=15",
+        "https://unstop.com/api/public/opportunity/search-result?opportunity=internships&searchTerm=data&sort=recent&per_page=15"
+    ]
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Accept": "application/json"}
+    seen_ids = set()
+    for endpoint in endpoints:
+        try:
+            res = HTTP.get(endpoint, headers=headers, timeout=20)
+            if res.status_code != 200: continue
+            data = res.json().get("data", {}).get("data", [])
+            for item in data:
+                oid = item.get("id")
+                if not oid or oid in seen_ids: continue
+                seen_ids.add(oid)
+                
+                title = clean(item.get("title", ""))
+                org = item.get("organisation", {}) or {}
+                company = clean(org.get("name") or "Unstop Partner")
+                job_detail = item.get("jobDetail", {}) or {}
+                locs = job_detail.get("locations", [])
+                location = ", ".join(locs) if locs else "India"
+                is_remote = job_detail.get("type") == "work_from_home" or "remote" in location.lower()
+                
+                url = item.get("seo_url") or item.get("short_url") or f"https://unstop.com/jobs/{oid}"
+                desc = title
+                
+                posted_str = item.get("approved_date") or (item.get("regnRequirements", {}) or {}).get("start_regn_dt")
+                posted = when(posted_str) or NOW
+                
+                add(out, title, company, location, url, desc, posted, "Unstop", remote=is_remote)
+        except Exception as exc:
+            print(f"[warn] Unstop {endpoint}: {exc}")
+    return out
+
 def mode(job):
     location, desc = job["location"], job["desc"]
     if job["remote"] or REMOTE.search(location): return "Remote"
@@ -124,16 +220,23 @@ def mode(job):
 def qualifies(job):
     title, desc, posted = job["title"], job["desc"], when(job["posted"])
     blob, work = title+" "+desc, mode(job)
-    india_ok = bool(INDIA.search(job["location"]) or (work == "Remote" and (INDIA.search(blob) or GLOBAL.search(job["location"]+" "+desc)))); entry = bool(ENTRY_TITLE.search(title) or ENTRY_TEXT.search(desc))
-    return bool(ROLE.search(title) and not SENIOR.search(title) and re.search(r"\bpython\b", blob, re.I) and entry and not OVER_ONE.search(desc)
-                and india_ok and not FEE.search(blob) and not BLOCKED.search(job["url"]) and job["company"] and job["url"].startswith("http") and posted and posted >= CUTOFF)
+    if not (posted and posted >= CUTOFF): return False
+    if not job["company"] or not job["url"].startswith("http"): return False
+    if FEE.search(blob) or SENIOR.search(title) or OVER_ONE.search(desc) or BLOCKED.search(job["url"]): return False
+    
+    if job["source"] in ("Internshala", "Unstop"):
+        return bool(ROLE.search(title) or ROLE.search(desc))
+        
+    india_ok = bool(INDIA.search(job["location"]) or (work == "Remote" and (INDIA.search(blob) or GLOBAL.search(job["location"]+" "+desc))))
+    entry = bool(ENTRY_TITLE.search(title) or ENTRY_TEXT.search(desc))
+    return bool(ROLE.search(title) and entry and india_ok)
 def identity(job):
     key = re.sub(r"\W+", "", (job["company"]+"|"+job["title"]).lower()); return hashlib.sha1(key.encode()).hexdigest()[:20]
 def excerpt(text):
     parts = re.split(r"(?<=[.!?])\s+", text); useful = [x for x in parts if re.search(r"\b(?:python|experience|fresher|intern)\b", x, re.I)]
     value = " ".join((useful or parts)[:2]); return value[:220].rstrip()+("…" if len(value) > 220 else "")
 def messages(jobs):
-    header = f"📊 *Data Jobs — {NOW.astimezone(TZ):%d %b %Y}* (fresher/0–1yr)\n"
+    header = f"🚀 *Jobs & Internships — {NOW.astimezone(TZ):%d %b %Y}* (Last 7 Days | Freshers & Entry-Level)\n"
     batches, current = [], header
     for job in jobs:
         posted = when(job["posted"]).astimezone(TZ).strftime("%d %b")
@@ -215,7 +318,8 @@ def send(message):
             print(f"[warn] {provider} send failed: {exc}")
 def main():
     best = {}
-    for job in ats_jobs()+accenture_jobs()+indigo_jobs():
+    all_jobs = ats_jobs() + accenture_jobs() + indigo_jobs() + internshala_jobs() + unstop_jobs()
+    for job in all_jobs:
         key = identity(job)
         if qualifies(job) and (key not in best or when(job["posted"]) > when(best[key]["posted"])): best[key] = job
     try: seen = json.loads(SEEN.read_text())

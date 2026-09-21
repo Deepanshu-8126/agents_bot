@@ -83,8 +83,8 @@ jobs:
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
           FORCE_SEND:           ${{ inputs.force_send && '1' || '0' }}
           TIMEZONE:             Asia/Kolkata
-          HOURS_OLD:            "36"
-          MAX_JOBS:             "20"
+          HOURS_OLD:            "168"
+          MAX_JOBS:             "25"
         run: python job_alert.py
 
       - name: Run client lead alert (Freelancer + Reddit + Discord + Remote)
