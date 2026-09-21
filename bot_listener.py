@@ -9,6 +9,7 @@ Features:
 4. Skill & Tag search: e.g. 'data analyst', 'video editing', 'internshala', 'unstop'.
 5. Freelance client leads: 'client leads', 'freelance projects'.
 """
+
 import html, json, os, re, sys, time, io
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -35,7 +36,10 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 if not BOT_TOKEN:
     print("[error] TELEGRAM_BOT_TOKEN is missing in .env or environment!")
 
-HTTP = httpx.Client(http2=True, timeout=35)
+try:
+    HTTP = httpx.Client(http2=True, timeout=35)
+except Exception:
+    HTTP = httpx.Client(timeout=35)
 API_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}"
 FILE_BASE = f"https://api.telegram.org/file/bot{BOT_TOKEN}"
 

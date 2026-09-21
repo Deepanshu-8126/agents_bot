@@ -25,14 +25,17 @@ def _load_env():
 _load_env()
 
 import httpx; from bs4 import BeautifulSoup; from dateutil.parser import parse
-NOW, HOURS = datetime.now(timezone.utc), int(os.getenv("HOURS_OLD", "168")); CUTOFF, TZ = NOW-timedelta(hours=HOURS), ZoneInfo(os.getenv("TIMEZONE", "Asia/Kolkata"))
+NOW, HOURS = datetime.now(timezone.utc), int(os.getenv("HOURS_OLD", "168")); CUTOFF = NOW-timedelta(hours=HOURS)
+try: TZ = ZoneInfo(os.getenv("TIMEZONE", "Asia/Kolkata"))
+except Exception: TZ = timezone(timedelta(hours=5, minutes=30))
 SEEN = Path(os.getenv("SEEN_FILE", "seen_jobs.json")); MAX_JOBS = int(os.getenv("MAX_JOBS", "25"))
 # Add any employer's public board as kind|Company|token; these are original ATS feeds, not aggregators.
 DEFAULT_BOARDS = (
  "greenhouse|Razorpay|razorpaysoftwareprivatelimited,greenhouse|Groww|groww,greenhouse|MongoDB|mongodb,greenhouse|Elastic|elastic,greenhouse|Datadog|datadog,greenhouse|Cloudflare|cloudflare,greenhouse|Twilio|twilio,greenhouse|Okta|okta,greenhouse|Airbnb|airbnb,greenhouse|Coursera|coursera,greenhouse|Samsara|samsara,greenhouse|Cockroach Labs|cockroachlabs,greenhouse|Rubrik|rubrik,greenhouse|Sumo Logic|sumologic,greenhouse|Coinbase|coinbase,greenhouse|Fivetran|fivetran,greenhouse|Netskope|netskope,"
  "greenhouse|Deliveroo|deliveroo,greenhouse|GitLab|gitlab,greenhouse|Remote|remotecom,greenhouse|Databricks|databricks,greenhouse|Stripe|stripe,lever|Meesho|meesho,lever|Zeta|zeta,lever|Sophos|sophos,ashby|Atlan|atlan,ashby|Tekion|tekion,ashby|Snowflake|snowflake,ashby|Confluent|confluent,ashby|Navi|navi,ashby|RevenueCat|revenuecat,ashby|Zapier|zapier")
 BOARDS = DEFAULT_BOARDS + ((","+os.getenv("ATS_BOARDS")) if os.getenv("ATS_BOARDS") else "")
-HTTP = httpx.Client(http2=True, follow_redirects=True, timeout=30, headers={"Accept":"application/json,text/html"})
+try: HTTP = httpx.Client(http2=True, follow_redirects=True, timeout=30, headers={"Accept":"application/json,text/html"})
+except Exception: HTTP = httpx.Client(follow_redirects=True, timeout=30, headers={"Accept":"application/json,text/html"})
 ROLE = re.compile(
     r"\b(?:"
     r"data|analytics?|business intelligence|bi|mis|sql|excel|dashboard|power bi|tableau|"
