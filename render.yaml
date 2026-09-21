@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: agents-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python prospect_app.py serve --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TIMEZONE
+        value: Asia/Kolkata
+      - key: HOURS_OLD
+        value: "168"
+      - key: MAX_JOBS
+        value: "25"

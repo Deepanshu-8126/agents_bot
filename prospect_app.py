@@ -264,6 +264,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:self.send_json({"error":str(exc)},400)
     def log_message(self,fmt,*args):print(f"[dashboard] {self.address_string()} {fmt%args}")
 def serve(host,port):
+    import threading, bot_listener
+    threading.Thread(target=bot_listener.run_listener, daemon=True).start()
     print(f"Prospect dashboard: http://{host}:{port}");ThreadingHTTPServer((host,port),Handler).serve_forever()
 def main():
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest="command",required=True)
