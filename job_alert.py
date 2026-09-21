@@ -166,20 +166,22 @@ def send(message):
     if provider == "telegram":
         # ✅ Best free option — unlimited, forever, no trial
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        chat_id   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-        if not bot_token or not chat_id:
+        raw_chats = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+        chat_ids  = [c.strip() for c in raw_chats.split(",") if c.strip()]
+        if not bot_token or not chat_ids:
             print("::error title=Missing Telegram Credentials::TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing! Set them in GitHub Secrets (Settings -> Secrets and variables -> Actions).")
             return
-        for chunk in [message[i:i+4000] for i in range(0, len(message), 4000)]:
-            try:
-                r = HTTP.post(
-                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                    json={"chat_id": chat_id, "text": chunk},
-                )
-                r.raise_for_status()
-                print(f"[info] Telegram message delivered successfully to chat {chat_id}! (HTTP {r.status_code})")
-            except Exception as exc:
-                print(f"[warn] Telegram send failed: {exc}")
+        for cid in chat_ids:
+            for chunk in [message[i:i+4000] for i in range(0, len(message), 4000)]:
+                try:
+                    r = HTTP.post(
+                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                        json={"chat_id": cid, "text": chunk},
+                    )
+                    r.raise_for_status()
+                    print(f"[info] Telegram message delivered successfully to chat/channel {cid}! (HTTP {r.status_code})")
+                except Exception as exc:
+                    print(f"[warn] Telegram send failed for {cid}: {exc}")
         return
 
     elif provider == "callmebot":
