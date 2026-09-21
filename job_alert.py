@@ -217,10 +217,11 @@ def mode(job):
     if job["remote"] or REMOTE.search(location): return "Remote"
     if HYBRID.search(location+" "+desc): return "Hybrid"
     return "Remote" if re.search(r"\b(?:fully remote|remote (?:role|position)|work[- ]from[- ]home)\b", desc, re.I) else "Onsite"
-def qualifies(job):
+def qualifies(job, cutoff=None):
     title, desc, posted = job["title"], job["desc"], when(job["posted"])
     blob, work = title+" "+desc, mode(job)
-    if not (posted and posted >= CUTOFF): return False
+    eff_cutoff = CUTOFF if cutoff is None else cutoff
+    if not (posted and posted >= eff_cutoff): return False
     if not job["company"] or not job["url"].startswith("http"): return False
     if FEE.search(blob) or SENIOR.search(title) or OVER_ONE.search(desc) or BLOCKED.search(job["url"]): return False
     

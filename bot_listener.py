@@ -130,9 +130,10 @@ def get_all_jobs(force_refresh=False):
         + jobs_core.unstop_jobs()
     )
 
+    cutoff_45d = datetime.now(timezone.utc) - timedelta(days=45)
     best = {}
     for job in all_jobs:
-        if jobs_core.qualifies(job):
+        if jobs_core.qualifies(job, cutoff=cutoff_45d):
             key = jobs_core.identity(job)
             if key not in best or jobs_core.when(job["posted"]) > jobs_core.when(best[key]["posted"]):
                 best[key] = job
