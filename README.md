@@ -17,7 +17,7 @@ Python 3.10+ is recommended.
 python -m venv .venv
 source .venv/bin/activate                 # Windows: .venv\Scripts\activate
 pip install -U 'httpx[http2]' beautifulsoup4 python-dateutil
-cp .env.example .env                       # fill keys, then chmod 600 .env
+cp .env.example .env                       # Fill keys, then chmod 600 .env
 set -a; source .env; set +a
 
 DRY_RUN=1 python job_alert.py
